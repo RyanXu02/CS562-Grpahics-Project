@@ -1,0 +1,23 @@
+syntax: glob
+*.dvi
+*.aux
+*.log
+*.o
+*.pyc
+*~
+.~*
+*/www/*.html
+*.old
+*.ncb
+*.user
+*.exe
+*.orig
+*.obj
+pyglet
+unused
+.directory
+make.depend
+
+pg
+dependencies
+imgui.ini
