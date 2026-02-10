@@ -679,7 +679,7 @@ void Scene::DrawScene()
     // G-buffer pass
     ////////////////////////////////////////////////////////////////////////////////
     gbufferProgram->UseShader();
-    int gpid = gbufferProgram->programId;
+    programId = gbufferProgram->programId;
 
     if (gbufferFBO.width != width || gbufferFBO.height != height) {
         gbufferFBO.DestroyFBO();
@@ -692,13 +692,13 @@ void Scene::DrawScene()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // scene uniforms
-    loc = glGetUniformLocation(gpid, "WorldProj");
+    loc = glGetUniformLocation(programId, "WorldProj");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(gpid, "WorldView");
+    loc = glGetUniformLocation(programId, "WorldView");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
-    loc = glGetUniformLocation(gpid, "WorldInverse");
+    loc = glGetUniformLocation(programId, "WorldInverse");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(gpid, "time");
+    loc = glGetUniformLocation(programId, "time");
     glUniform1f(loc, currentTime);
 
     // draw scene geometry into render targeets
@@ -789,26 +789,26 @@ void Scene::DrawScene()
         glCullFace(GL_FRONT);
 
         localLightProgram->UseShader();
-        int pid = localLightProgram->programId;
-        glUniformMatrix4fv(glGetUniformLocation(pid, "WorldProj"), 1, GL_FALSE, glm::value_ptr(WorldProj));
-        glUniformMatrix4fv(glGetUniformLocation(pid, "WorldView"), 1, GL_FALSE, glm::value_ptr(WorldView));
-        glUniform1i(glGetUniformLocation(pid, "debugDrawSpheres"), localLightDebug);
+        programId = localLightProgram->programId;
+        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldProj"), 1, GL_FALSE, glm::value_ptr(WorldProj));
+        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldView"), 1, GL_FALSE, glm::value_ptr(WorldView));
+        glUniform1i(glGetUniformLocation(programId, "debugDrawSpheres"), localLightDebug);
         // bind G-buffer
-        gbufferFBO.BindTexture(0, 0, pid, "gWorldPos");
-        gbufferFBO.BindTexture(1, 1, pid, "gNormal");
-        gbufferFBO.BindTexture(2, 2, pid, "gKd");
-        gbufferFBO.BindTexture(3, 3, pid, "gKsAlpha");
-        glUniform2f(glGetUniformLocation(pid, "screenSize"),
+        gbufferFBO.BindTexture(0, 0, programId, "gWorldPos");
+        gbufferFBO.BindTexture(1, 1, programId, "gNormal");
+        gbufferFBO.BindTexture(2, 2, programId, "gKd");
+        gbufferFBO.BindTexture(3, 3, programId, "gKsAlpha");
+        glUniform2f(glGetUniformLocation(programId, "screenSize"),
             (float)width, (float)height);
-        glUniform3fv(glGetUniformLocation(pid, "eyePos"), 1, &eyePosWS[0]);
+        glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, &eyePosWS[0]);
 
         for (const LocalLight& L : localLights)
         {
             glm::mat4 ModelTr = glm::translate(glm::mat4(1), L.position) * glm::scale(glm::mat4(1), glm::vec3(L.radius));
-            glUniformMatrix4fv(glGetUniformLocation(pid, "ModelTr"), 1, GL_FALSE, glm::value_ptr(ModelTr));
-            glUniform3fv(glGetUniformLocation(pid, "lightPos"), 1, &L.position[0]);
-            glUniform3fv(glGetUniformLocation(pid, "lightColor"), 1, &L.color[0]);
-            glUniform1f(glGetUniformLocation(pid, "lightRadius"), L.radius);
+            glUniformMatrix4fv(glGetUniformLocation(programId, "ModelTr"), 1, GL_FALSE, glm::value_ptr(ModelTr));
+            glUniform3fv(glGetUniformLocation(programId, "lightPos"), 1, &L.position[0]);
+            glUniform3fv(glGetUniformLocation(programId, "lightColor"), 1, &L.color[0]);
+            glUniform1f(glGetUniformLocation(programId, "lightRadius"), L.radius);
 
             sphere_light->DrawVAO();
         }

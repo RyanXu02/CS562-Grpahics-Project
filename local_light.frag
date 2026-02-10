@@ -44,7 +44,7 @@ void main()
     if (d >= lightRadius)
         discard;
 
-    vec3 L = Lvec / d;
+    vec3 L = normalize(Lvec);
     vec3 V = normalize(eyePos - P);
     vec3 H = normalize(L + V);
 
