@@ -732,7 +732,7 @@ void Scene::DrawScene()
     glBindImageTexture(0, shadowFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(1, shadowBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(blurHProgram->programId, "blurRadius"), blurRadius);
-    glDispatchCompute((res + 255) / 256, res, 1);
+    glDispatchCompute((res + 127) / 128, res, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     blurHProgram->UnuseShader();
     // vertical: shadowBlurFBO -> shadowFBO
@@ -740,7 +740,7 @@ void Scene::DrawScene()
     glBindImageTexture(0, shadowBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glBindImageTexture(1, shadowFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(blurVProgram->programId, "blurRadius"), blurRadius);
-    glDispatchCompute(res, (res + 255) / 256, 1);
+    glDispatchCompute(res, (res + 127) / 128, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     blurVProgram->UnuseShader();
 
