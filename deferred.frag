@@ -18,6 +18,61 @@ uniform mat4 ShadowMatrix;    // this is precomputed!
 
 const float PI = 3.14159265358979323846264338327950;
 
+uniform float z0; // near depth
+uniform float z1; // far depth
+
+vec3 cholesky(float m11, float m12, float m13,
+              float m22, float m23, float m33,
+              float z1,  float z2,  float z3)
+{
+    float a = sqrt(max(m11, 1e-8));
+    float b = m12 / a;
+    float c = m13 / a;
+    float d = sqrt(max(m22 - b*b, 1e-8));
+    float e = (m23 - b*c) / d;
+    float f = sqrt(max(m33 - c*c - e*e, 1e-8));
+
+    float c1h = z1 / a;
+    float c2h = (z2 - b*c1h) / d;
+    float c3h = (z3 - c*c1h - e*c2h) / f;
+
+    float c3 = c3h / f;
+    float c2 = (c2h - e*c3) / d;
+    float c1 = (c1h - b*c2 - c*c3) / a;
+    return vec3(c1, c2, c3);
+}
+
+float MSM(vec4 b_raw, float zf) {
+    float alpha = 1e-3;
+    // 1. bias
+    vec4 b = mix(b_raw, vec4(0.5), alpha);
+
+    // 2. Cholesky solve for c
+    vec3 c = cholesky(
+        1.0,   b.x,   b.y,
+               b.y,   b.z,
+                      b.w,
+        1.0, zf, zf*zf
+    );
+
+    // 3. solve c3*z^2 + c2*z + c1 = 0
+    float disc = c.y*c.y - 4.0*c.z*c.x;
+    disc = max(disc, 0.0);
+    float sq = sqrt(disc);
+    float z2 = (-c.y - sq) / (2.0 * c.z);
+    float z3 = (-c.y + sq) / (2.0 * c.z);
+    if (z2 > z3) { float tmp = z2; z2 = z3; z3 = tmp; }
+
+    // 4.
+    if (zf <= z2) return 0.0;
+    // 5.
+    else if (zf <= z3)
+        return (zf*z3 - b.x*(zf + z3) + b.y) / ((z3 - z2)*(zf - z2));
+    // 6.
+    else
+        return 1.0 - (z2*z3 - b.x*(z2 + z3) + b.y) / ((zf - z2)*(zf - z3));
+}
+
 void main()
 {
     // Read G-buffer
@@ -48,18 +103,19 @@ void main()
 
     // Shadows
     vec4 shadowCoord = ShadowMatrix * vec4(P, 1.0);
-    vec2 shadowIndex = shadowCoord.xy / shadowCoord.w;
+    vec2 shadowUV = shadowCoord.xy / shadowCoord.w;
     bool inRange = shadowCoord.w > 0.0 &&
-                   all(greaterThanEqual(shadowIndex, vec2(0.0))) &&
-                   all(lessThanEqual(shadowIndex, vec2(1.0)));
-
-    float shadowed = 0.0;
-    if (inRange) {
-        float lightDepth = texture(shadowMap, shadowIndex).w;
-        float pixelDepth = shadowCoord.w;
-        shadowed = ((pixelDepth - 0.005) > lightDepth) ? 1.0 : 0.0;
+                   all(greaterThanEqual(shadowUV, vec2(0.0))) &&
+                   all(lessThanEqual(shadowUV, vec2(1.0)));
+   
+    float rawDist = length(P - lightPos);
+    float zf = clamp((rawDist - z0) / (z1 - z0), 0.0, 1.0);
+    float shadow = 0.0;
+    if (inRange)
+    {
+        vec4 b = texture(shadowMap, shadowUV);
+        shadow = MSM(b, zf);
     }
-
-    vec3 color = Ambient * Kd + lit * (1.0 - shadowed);
+    vec3 color = Ambient * Kd + lit * (1.0 - shadow);
     FragColor = vec4(color, 1.0);
 }

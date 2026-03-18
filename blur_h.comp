@@ -1,0 +1,32 @@
+#version 430
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(rgba32f, binding = 0) readonly  uniform image2D srcImage;
+layout(rgba32f, binding = 1) writeonly uniform image2D dstImage;
+
+uniform int blurRadius;
+
+const float PI = 3.14159265;
+
+float gaussWeight(int offset, float sigma) {
+    return exp(-float(offset*offset) / (2.0*sigma*sigma));
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size  = imageSize(srcImage);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    float sigma = float(blurRadius) / 2.0;
+    vec4 result = vec4(0.0);
+    float totalWeight = 0.0;
+
+    for (int i = -blurRadius; i <= blurRadius; i++) {
+        int sx = clamp(coord.x + i, 0, size.x - 1);
+        float w = gaussWeight(i, sigma);
+        result      += w * imageLoad(srcImage, ivec2(sx, coord.y));
+        totalWeight += w;
+    }
+    imageStore(dstImage, coord, result / totalWeight);
+}

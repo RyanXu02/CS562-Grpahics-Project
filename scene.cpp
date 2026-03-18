@@ -209,6 +209,9 @@ void Scene::InitializeScene()
 	localLights.push_back(L3);
 	localLights.push_back(L4);
 
+    z0 = lightDist - 60.0f;
+	z1 = lightDist + 60.0f;
+
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
@@ -236,6 +239,20 @@ void Scene::InitializeScene()
     shadowProgram->LinkProgram();
 	// Create shadow FBO
 	shadowFBO.CreateFBO(shadowFBOres, shadowFBOres);
+
+    // shadow blur shader programs
+    blurHProgram = new ShaderProgram();
+    blurHProgram->AddShader("blur_h.comp", GL_COMPUTE_SHADER);
+    blurHProgram->LinkProgram();
+    blurVProgram = new ShaderProgram();
+    blurVProgram->AddShader("blur_v.comp", GL_COMPUTE_SHADER);
+    blurVProgram->LinkProgram();
+    shadowDebugProgram = new ShaderProgram();
+    shadowDebugProgram->AddShader("gbuffer_debug.vert", GL_VERTEX_SHADER); // resuse gbuffer debug vert shader is ok
+    shadowDebugProgram->AddShader("shadow_debug.frag", GL_FRAGMENT_SHADER);
+    shadowDebugProgram->LinkProgram();
+	// Create shadow blur FBO
+    shadowBlurFBO.CreateFBO(shadowFBOres, shadowFBOres);
 
     // gbuffer shader program
     gbufferProgram = new ShaderProgram();
@@ -477,8 +494,14 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("GBuffer: Kd", "", mode == 3)) { mode = 3; }
             if (ImGui::MenuItem("GBuffer: Ks/Alpha", "", mode == 4)) { mode = 4; }
 
-            // Deferred shading + local lights
+            // Deferred shading + local lights + shadows
             if (ImGui::MenuItem("Deferred + Local lights", "", mode == 5)) { mode = 5; }
+            // shadow map debug views
+            if (ImGui::MenuItem("Shadow map (before blur)", "", mode == 6)) { mode = 6; }
+            if (ImGui::MenuItem("Shadow map (after blur)", "", mode == 7)) { mode = 7; }
+            // shadow blur radius slider
+            ImGui::SliderInt("Shadow blur radius", &blurRadius, 1, 100);
+
 
             ImGui::EndMenu();
         }
@@ -513,6 +536,8 @@ void Scene::DrawMenu()
         ImGui::SliderFloat("Light spin (deg)", &lightSpin, -180.0f, 180.0f);
         ImGui::SliderFloat("Light tilt (deg)", &lightTilt, -89.9f, 89.9f);
         ImGui::End();
+		z0 = lightDist - 60.0f;
+		z1 = lightDist + 60.0f;
     }
 
     // stats window
@@ -664,6 +689,11 @@ void Scene::DrawScene()
 	loc = glGetUniformLocation(shadowProgram->programId, "LightView");
 	glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(LightView));
 
+    loc = glGetUniformLocation(shadowProgram->programId, "z0");
+    glUniform1f(loc, z0);
+    loc = glGetUniformLocation(shadowProgram->programId, "z1");
+    glUniform1f(loc, z1);
+
     CHECKERROR;
 	objectRoot->Draw(shadowProgram, Identity);
     CHECKERROR;
@@ -673,7 +703,65 @@ void Scene::DrawScene()
 	shadowFBO.UnbindFBO();
     shadowProgram->UnuseShader();
 
+    ////////////////////////////////////////////////////////////////////////////////
+    // Blur pass  (horizontal then vertical)
+    ////////////////////////////////////////////////////////////////////////////////
+    // before blur debug view
+    if (mode == 6) {
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
 
+        shadowDebugProgram->UseShader();
+        int pid = shadowDebugProgram->programId;
+        shadowFBO.BindTexture(0, 0, pid, "shadowMap");
+
+        glBindVertexArray(gbufferDebugVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+
+        shadowFBO.UnbindTexture(0);
+        shadowDebugProgram->UnuseShader();
+        return;
+    }
+
+    // blur
+    const int res = static_cast<int>(shadowFBOres);
+    // horizontal: shadowFBO -> shadowBlurFBO
+    blurHProgram->UseShader();
+    glBindImageTexture(0, shadowFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, shadowBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(glGetUniformLocation(blurHProgram->programId, "blurRadius"), blurRadius);
+    glDispatchCompute((res + 255) / 256, res, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    blurHProgram->UnuseShader();
+    // vertical: shadowBlurFBO -> shadowFBO
+    blurVProgram->UseShader();
+    glBindImageTexture(0, shadowBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, shadowFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(glGetUniformLocation(blurVProgram->programId, "blurRadius"), blurRadius);
+    glDispatchCompute(res, (res + 255) / 256, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    blurVProgram->UnuseShader();
+
+	// after blur debug view
+    if (mode == 7) {
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
+
+        shadowDebugProgram->UseShader();
+        int pid = shadowDebugProgram->programId;
+        shadowFBO.BindTexture(0, 0, pid, "shadowMap");
+
+        glBindVertexArray(gbufferDebugVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+
+        shadowFBO.UnbindTexture(0);
+        shadowDebugProgram->UnuseShader();
+        return;
+    }
 
     ////////////////////////////////////////////////////////////////////////////////
     // G-buffer pass
@@ -772,6 +860,11 @@ void Scene::DrawScene()
         glm::vec3 eyePosWS = glm::vec3(WorldInverse * glm::vec4(0, 0, 0, 1));
         glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, (float*)&eyePosWS);
         glUniformMatrix4fv(glGetUniformLocation(programId, "ShadowMatrix"), 1, GL_FALSE, glm::value_ptr(ShadowMatrix));
+        
+        loc = glGetUniformLocation(deferredProgram->programId, "z0");
+        glUniform1f(loc, z0);
+        loc = glGetUniformLocation(deferredProgram->programId, "z1");
+        glUniform1f(loc, z1);
 
         // draw full-screen triangle to apply lighting to all pixels
         glBindVertexArray(deferredVAO);

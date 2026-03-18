@@ -103,6 +103,14 @@ public:
     // shadows
     ShaderProgram* shadowProgram;
     FBO shadowFBO;
+    // shadows blur
+    ShaderProgram* blurHProgram;
+    ShaderProgram* blurVProgram;
+    ShaderProgram* shadowDebugProgram;
+    FBO shadowBlurFBO;
+    int blurRadius = 30;
+    float z0;
+    float z1;
 
     // G-buffer
     ShaderProgram* gbufferProgram;
