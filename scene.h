@@ -131,6 +131,26 @@ public:
 	float exposure = 2.0f;
     float teapotAlpha = 120.0f;
 
+    // Ambient Occlusion
+    ShaderProgram* aoProgram;
+    ShaderProgram* aoBlurHProgram;
+    ShaderProgram* aoBlurVProgram;
+    FBO aoFBO;
+    FBO aoBlurFBO;
+    // fullscreen triangle VAO for AO pass
+    unsigned int aoVAO; 
+    // AO parameters
+    float aoRadius = 1.0f; // R
+    int aoSamples = 15; // n
+    float aoScale = 1.0f; // s
+    float aoContrast = 1.0f; // k
+    float aoDelta = 0.001f; // depth bias
+    float aoSigma = 0.01f; // bilateral range variance
+    int aoBlurRadius = 5;
+    // AO debug shader
+    ShaderProgram* aoDebugProgram;
+
+
     // Options menu stuff
     bool show_demo_window;
 

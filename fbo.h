@@ -15,6 +15,7 @@ public:
 
     void CreateFBO(const int w, const int h);
 	void CreateGbufferFBO(const int w, const int h);
+	void CreateAoFBO(const int w, const int h);
 
 	void DestroyFBO();
 

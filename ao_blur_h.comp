@@ -1,0 +1,77 @@
+#version 430 core
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// image units bound from the host
+layout(r32f, binding = 0) uniform readonly  image2D srcAO;
+layout(r32f, binding = 1) uniform writeonly image2D dstAO;
+
+// gbuffer for range kernel
+uniform sampler2D gPosition;   // world pos (RGBA32F)
+uniform sampler2D gNormal;     // world normal (RGBA32F)
+
+uniform mat4  WorldView;
+uniform int   blurRadius;      // w; half-width of the kernel
+uniform float sigma;           // range-kernel variance, ~0.01
+
+const float PI = 3.14159265359;
+
+// Camera-space depth magnitude from a world-space position
+float camDepth(vec3 Pworld) {
+    return -(WorldView * vec4(Pworld, 1.0)).z;
+}
+
+void main() {
+    ivec2 pix  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dstAO);
+    if (pix.x >= size.x || pix.y >= size.y) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(size);
+
+    // Center sample's geometry
+    vec3  P = texture(gPosition, uv).xyz;
+    vec3  N = normalize(texture(gNormal, uv).xyz);
+    float d = camDepth(P);
+
+    // Background / sky: pass through unchanged
+    if (dot(N, N) < 0.01) {
+        imageStore(dstAO, pix, vec4(imageLoad(srcAO, pix).r));
+        return;
+    }
+
+    // Spatial Gaussian: chosen so +/- blurRadius ~= 2.5 sigma (kernel tail).
+    float sSigma    = max(1.0, float(blurRadius) * 0.5);
+    float twoSspaceSq = 2.0 * sSigma * sSigma;
+
+    float sumA = 0.0;
+    float sumW = 0.0;
+
+    for (int i = -blurRadius; i <= blurRadius; ++i) {
+        ivec2 tapPix = ivec2(clamp(pix.x + i, 0, size.x - 1), pix.y);
+        vec2  tapUV  = (vec2(tapPix) + 0.5) / vec2(size);
+
+        float Ai = imageLoad(srcAO, tapPix).r;
+
+        vec3  Pi = texture(gPosition, tapUV).xyz;
+        vec3  Ni = normalize(texture(gNormal, tapUV).xyz);
+        float di = camDepth(Pi);
+
+        // Spatial (Gaussian on pixel distance)
+        float Sspace = exp(-float(i * i) / twoSspaceSq);
+
+        // Range (normal agreement * depth Gaussian)
+        float normalTerm = max(0.0, dot(Ni, N));
+        float dz = di - d;
+        float depthTerm = (1.0 / sqrt(2.0 * PI * sigma))
+                        * exp(-(dz * dz) / (2.0 * sigma));
+        float Srange = normalTerm * depthTerm;
+
+        float W = Sspace * Srange;
+        sumA += W * Ai;
+        sumW += W;
+    }
+
+    // Fall back to the center sample if every neighbor got vetoed
+    float outA = (sumW > 1e-6) ? (sumA / sumW) : imageLoad(srcAO, pix).r;
+    imageStore(dstAO, pix, vec4(outA));
+}

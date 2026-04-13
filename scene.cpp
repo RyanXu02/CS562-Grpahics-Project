@@ -169,6 +169,14 @@ void Scene::InitializeScene()
 	Ambient = glm::vec3(0.4, 0.4, 0.4);
     onlyLocalLights = 0;
     noDirectLight = 0;
+    // ao parameters
+    aoRadius = 2.0f;
+    aoSamples = 64;
+    aoScale = 3.5f;
+    aoContrast = 2.5f;
+    aoDelta = 0.001f;
+    aoSigma = 0.01f;
+    aoBlurRadius = 5;
 #pragma endregion
 
 #pragma region LocalLights
@@ -277,6 +285,28 @@ void Scene::InitializeScene()
 	// create deferred shading VAO
     glGenVertexArrays(1, &deferredVAO);
 
+    // AO program
+    aoProgram = new ShaderProgram();
+    aoProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);  // reuse fullscreen-triangle VS
+    aoProgram->AddShader("ao.frag", GL_FRAGMENT_SHADER);
+    aoProgram->LinkProgram();
+    // bilateral blur programs for AO
+    aoBlurHProgram = new ShaderProgram();
+    aoBlurHProgram->AddShader("ao_blur_h.comp", GL_COMPUTE_SHADER);
+    aoBlurHProgram->LinkProgram();
+    aoBlurVProgram = new ShaderProgram();
+    aoBlurVProgram->AddShader("ao_blur_v.comp", GL_COMPUTE_SHADER);
+    aoBlurVProgram->LinkProgram();
+    // AO fbos
+    aoFBO.CreateAoFBO(width, height);
+    aoBlurFBO.CreateAoFBO(width, height);
+    glGenVertexArrays(1, &aoVAO);
+    // AO debug shader
+    aoDebugProgram = new ShaderProgram();
+    aoDebugProgram->AddShader("gbuffer_debug.vert", GL_VERTEX_SHADER);
+    aoDebugProgram->AddShader("ao_debug.frag", GL_FRAGMENT_SHADER);
+    aoDebugProgram->LinkProgram();
+
 	// local light shader program
 	localLightProgram = new ShaderProgram();
 	localLightProgram->AddShader("local_light.vert", GL_VERTEX_SHADER);
@@ -382,7 +412,7 @@ void Scene::InitializeScene()
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
     room       = new Object(RoomPolygons, roomId, brickColor, noSpec, 1, brickTexture, brickNormalMap);
-    floor      = new Object(FloorPolygons, floorId, floorColor, lowSpec, 10, floorTexture, floorNormalMap);
+    floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 10, floorTexture, floorNormalMap);
     teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120, teapotTexture, teapotNormalMap);
     teapot2    = new Object(TeapotPolygons, teapotId, brassColor, brightestSpec, 120, teapotTexture, teapotNormalMap);
 	teapot3    = new Object(TeapotPolygons, teapotId, brassColor, noSpec, 120, teapotTexture, teapotNormalMap);
@@ -444,6 +474,18 @@ void Scene::InitializeScene()
 
     // Options menu stuff
     show_demo_window = true;
+
+
+
+    printf("shadowFBO.textureID[0] = %u\n", shadowFBO.textureID[0]);
+    printf("shadowBlurFBO.textureID[0] = %u\n", shadowBlurFBO.textureID[0]);
+    printf("gbufferFBO.textureID[0..3] = %u %u %u %u\n",
+        gbufferFBO.textureID[0], gbufferFBO.textureID[1],
+        gbufferFBO.textureID[2], gbufferFBO.textureID[3]);
+    printf("aoFBO.textureID[0] = %u\n", aoFBO.textureID[0]);
+    printf("aoBlurFBO.textureID[0] = %u\n", aoBlurFBO.textureID[0]);
+    printf("shadowFBO.fboID = %u, aoFBO.fboID = %u\n",
+        shadowFBO.fboID, aoFBO.fboID);
 }
 
 void Scene::DrawMenu()
@@ -458,6 +500,7 @@ void Scene::DrawMenu()
     static bool showLightingWindow = false;
     static bool showMaterialWindow = false;
     static bool showShadowWindow = false;
+    static bool showAOWindow = false;
     static bool wireframe = false;
     static bool vsync = true;
     static bool MSAA = true;
@@ -476,7 +519,7 @@ void Scene::DrawMenu()
 			if (ImGui::MenuItem("Draw floor", "", floor->drawMe)) { floor->drawMe ^= true; }
             ImGui::Separator();
             if (ImGui::MenuItem("Only local lights", "", onlyLocalLights)) { onlyLocalLights ^= true; }
-            if (ImGui::MenuItem("Disable direct lights (IBL only)", "", noDirectLight)) { noDirectLight ^= true; }
+            if (ImGui::MenuItem("Disable direct and local lights", "", noDirectLight)) { noDirectLight ^= true; }
             ImGui::EndMenu();
         }
 
@@ -511,6 +554,9 @@ void Scene::DrawMenu()
             ImGui::TextDisabled("Shadow Map");
             if (ImGui::MenuItem("  Before blur", "", mode == 6)) { mode = 6; }
             if (ImGui::MenuItem("  After blur", "", mode == 7)) { mode = 7; }
+            ImGui::Separator();
+            ImGui::TextDisabled("Ambient Occlusion");
+            if (ImGui::MenuItem("  AO (after blur)", "", mode == 8)) { mode = 8; }
             ImGui::EndMenu();
         }
 
@@ -519,6 +565,7 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Lighting", "", showLightingWindow)) { showLightingWindow ^= true; }
             if (ImGui::MenuItem("Material", "", showMaterialWindow)) { showMaterialWindow ^= true; }
             if (ImGui::MenuItem("Shadows", "", showShadowWindow)) { showShadowWindow ^= true; }
+            if (ImGui::MenuItem("Ambient Occlusion", "", showAOWindow)) { showAOWindow ^= true; }
             if (ImGui::MenuItem("Camera", "", showCameraWindow)) { showCameraWindow ^= true; }
             if (ImGui::MenuItem("Stats", "", showStatsWindow)) { showStatsWindow ^= true; }
             ImGui::Separator();
@@ -575,6 +622,26 @@ void Scene::DrawMenu()
     if (showShadowWindow) {
         ImGui::Begin("Shadows", &showShadowWindow);
         ImGui::SliderInt("Blur radius", &blurRadius, 1, 100);
+        ImGui::End();
+    }
+
+        // ambient occlusion window
+    if (showAOWindow) {
+        ImGui::Begin("Ambient Occlusion", &showAOWindow);
+        ImGui::Text("Sampling");
+        ImGui::SliderFloat("Radius (R)", &aoRadius, 0.01f, 20.0f, "%.2f");
+        ImGui::SliderInt("Samples (n)", &aoSamples, 1, 64);
+        ImGui::SliderFloat("Scale (s)", &aoScale, 0.0f, 10.0f, "%.2f");
+        ImGui::SliderFloat("Contrast (k)", &aoContrast, 0.1f, 10.0f, "%.2f");
+        ImGui::SliderFloat("Depth bias (delta)", &aoDelta, 0.0f, 0.1f, "%.4f");
+        ImGui::Separator();
+        ImGui::Text("Bilateral Blur");
+        ImGui::SliderInt("Blur radius", &aoBlurRadius, 0, 20);
+        ImGui::SliderFloat("Sigma (range)", &aoSigma, 0.001f, 1.0f, "%.4f");
+        ImGui::Separator();
+        if (ImGui::Button("View AO buffer")) { mode = 8; }
+        ImGui::SameLine();
+        if (mode == 8 && ImGui::Button("Back to default")) { mode = 0; }
         ImGui::End();
     }
 
@@ -804,7 +871,7 @@ void Scene::DrawScene()
     glBindImageTexture(1, shadowFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(glGetUniformLocation(blurVProgram->programId, "blurRadius"), blurRadius);
     glDispatchCompute(res, (res + 127) / 128, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     blurVProgram->UnuseShader();
 
 	// after blur debug view
@@ -890,11 +957,103 @@ void Scene::DrawScene()
         return;
     }
 #pragma endregion
+    ////////////////////////////////////////////////////////////////////////////////
+    // Ambient Occlusion pass
+    ////////////////////////////////////////////////////////////////////////////////
+#pragma region AoPass
+    
+    // Resize if window changed
+    if (aoFBO.width != width || aoFBO.height != height) {
+        aoFBO.DestroyFBO();      aoFBO.CreateAoFBO(width, height);
+        aoBlurFBO.DestroyFBO();  aoBlurFBO.CreateAoFBO(width, height);
+    }
 
+    aoFBO.BindFBO();
+    glViewport(0, 0, width, height);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    aoProgram->UseShader();
+    int pid = aoProgram->programId;
+
+    gbufferFBO.BindTexture(0, 0, pid, "gPosition");  // world pos
+    gbufferFBO.BindTexture(1, 1, pid, "gNormal");    // world normal
+
+    glUniformMatrix4fv(glGetUniformLocation(pid, "WorldView"),
+        1, GL_FALSE, glm::value_ptr(WorldView));
+    glUniform2f(glGetUniformLocation(pid, "screenSize"),
+        (float)width, (float)height);
+    glUniform1f(glGetUniformLocation(pid, "R"), aoRadius);
+    glUniform1i(glGetUniformLocation(pid, "n"), aoSamples);
+    glUniform1f(glGetUniformLocation(pid, "s"), aoScale);
+    glUniform1f(glGetUniformLocation(pid, "k"), aoContrast);
+    glUniform1f(glGetUniformLocation(pid, "delta"), aoDelta);
+    float projScale = (float)height * 0.5f * WorldProj[1][1];
+    glUniform1f(glGetUniformLocation(pid, "projScale"), projScale);
+
+
+    glBindVertexArray(aoVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    gbufferFBO.UnbindTexture(1);
+    gbufferFBO.UnbindTexture(0);
+    aoProgram->UnuseShader();
+    aoFBO.UnbindFBO();
+
+    // bilateral blur
+    // Horizontal: aoFBO -> aoBlurFBO
+    aoBlurHProgram->UseShader();
+    glBindImageTexture(0, aoFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+    glBindImageTexture(1, aoBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+    gbufferFBO.BindTexture(0, 2, aoBlurHProgram->programId, "gPosition");
+    gbufferFBO.BindTexture(1, 3, aoBlurHProgram->programId, "gNormal");
+    glUniformMatrix4fv(glGetUniformLocation(aoBlurHProgram->programId, "WorldView"),
+        1, GL_FALSE, glm::value_ptr(WorldView));
+    glUniform1i(glGetUniformLocation(aoBlurHProgram->programId, "blurRadius"), aoBlurRadius);
+    glUniform1f(glGetUniformLocation(aoBlurHProgram->programId, "sigma"), aoSigma);
+    glDispatchCompute((width + 127) / 128, height, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    aoBlurHProgram->UnuseShader();
+    // Vertical: aoBlurFBO -> aoFBO
+    aoBlurVProgram->UseShader();
+    glBindImageTexture(0, aoBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+    glBindImageTexture(1, aoFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+    gbufferFBO.BindTexture(0, 2, aoBlurVProgram->programId, "gPosition");
+    gbufferFBO.BindTexture(1, 3, aoBlurVProgram->programId, "gNormal");
+    glUniformMatrix4fv(glGetUniformLocation(aoBlurVProgram->programId, "WorldView"),
+        1, GL_FALSE, glm::value_ptr(WorldView));
+    glUniform1i(glGetUniformLocation(aoBlurVProgram->programId, "blurRadius"), aoBlurRadius);
+    glUniform1f(glGetUniformLocation(aoBlurVProgram->programId, "sigma"), aoSigma);
+    glDispatchCompute(width, (height + 127) / 128, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    aoBlurVProgram->UnuseShader();
+
+    if (mode == 8) {
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
+
+        aoDebugProgram->UseShader();
+        int pid = aoDebugProgram->programId;
+        aoFBO.BindTexture(0, 0, pid, "aoMap");
+
+        glBindVertexArray(gbufferDebugVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+
+        aoFBO.UnbindTexture(0);
+        aoDebugProgram->UnuseShader();
+        return;
+    }
+    
+#pragma endregion
     ////////////////////////////////////////////////////////////////////////////////
     // Deferred shading pass + local lights
     ////////////////////////////////////////////////////////////////////////////////
     {
+#pragma region DeferredPass
         glViewport(0, 0, width, height);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
@@ -913,6 +1072,9 @@ void Scene::DrawScene()
         // bind HDR
         hdr->BindTexture(5, programId, "environmentMap");
         hdrIrr->BindTexture(6, programId, "irradianceMap");
+
+        // bind AO map
+        aoFBO.BindTexture(0, 7, programId, "aoMap");
 
 		// turn off lights if only local lights mode is on 
         const glm::vec3 nothing(0.0f, 0.0f, 0.0f);
@@ -952,11 +1114,14 @@ void Scene::DrawScene()
         gbufferFBO.UnbindTexture(2);
         gbufferFBO.UnbindTexture(1);
         gbufferFBO.UnbindTexture(0);
+		aoFBO.UnbindTexture(7);
 
         deferredProgram->UnuseShader();
-		////////////////////////////////////////////////////////////////////////////////
-        // local lights pass
-        ////////////////////////////////////////////////////////////////////////////////
+#pragma endregion
+    ////////////////////////////////////////////////////////////////////////////////
+    // local lights pass
+    ////////////////////////////////////////////////////////////////////////////////
+#pragma region LocalLightsPass
         if (!noDirectLight){
             glDisable(GL_DEPTH_TEST);
             glEnable(GL_BLEND);
@@ -995,8 +1160,8 @@ void Scene::DrawScene()
             glEnable(GL_DEPTH_TEST);
             glCullFace(GL_BACK);
         }
+#pragma endregion
     }
-
     ////////////////////////////////////////////////////////////////////////////////
     // End of DrawScene
     ////////////////////////////////////////////////////////////////////////////////

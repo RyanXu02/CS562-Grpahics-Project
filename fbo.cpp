@@ -147,6 +147,35 @@ void FBO::CreateGbufferFBO(const int w, const int h)
     // Unbind the fbo until it's ready to be used
     glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
 }
+void FBO::CreateAoFBO(const int w, const int h) {
+    width = w;
+    height = h;
+
+    glGenFramebuffersEXT(1, &fboID);
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fboID);
+
+    glGenTextures(1, &textureID[0]);
+    glBindTexture(GL_TEXTURE_2D, textureID[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, castGLint(GL_R32F),
+        width, height, 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, castGLint(GL_CLAMP_TO_EDGE));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, castGLint(GL_CLAMP_TO_EDGE));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, castGLint(GL_LINEAR));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, castGLint(GL_LINEAR));
+
+    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
+        GL_TEXTURE_2D, textureID[0], 0);
+
+    const GLenum drawBuffers[1] = { GL_COLOR_ATTACHMENT0_EXT };
+    glDrawBuffers(1, drawBuffers);
+
+    const int status = castGLint(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
+    if (status != int(GL_FRAMEBUFFER_COMPLETE_EXT))
+        printf("AO FBO Error: %d\n", status);
+
+    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
+}
 
 void FBO::DestroyFBO()
 {

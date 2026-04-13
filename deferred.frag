@@ -27,6 +27,8 @@ uniform sampler2D irradianceMap;
 
 uniform float exposure;
 
+uniform sampler2D aoMap;
+
 uniform HammersleyBlock {
     float N;
     float hammersley[2 * 100];
@@ -203,7 +205,8 @@ void main()
     vec3 irradiance  = texture(irradianceMap, uvOf(N)).rgb;
     vec3 diffuseIBL  = (Kd / PI) * irradiance;
     vec3 specIBL = specularIBL(N, V, Ks, alpha);
-    vec3 C = directLight + diffuseIBL + specIBL;
+    float ao = texture(aoMap, vUV).r;
+    vec3 C = directLight + ao*(diffuseIBL + specIBL);
 
     vec3 mapped = (exposure * C) / (exposure * C + vec3(1.0));
     vec3 display = pow(mapped, vec3(1.0 / 2.2));

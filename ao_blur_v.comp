@@ -1,0 +1,68 @@
+#version 430 core
+
+layout(local_size_x = 1, local_size_y = 128, local_size_z = 1) in;
+
+layout(r32f, binding = 0) uniform readonly  image2D srcAO;
+layout(r32f, binding = 1) uniform writeonly image2D dstAO;
+
+uniform sampler2D gPosition;
+uniform sampler2D gNormal;
+
+uniform mat4  WorldView;
+uniform int   blurRadius;
+uniform float sigma;
+
+const float PI = 3.14159265359;
+
+float camDepth(vec3 Pworld) {
+    return -(WorldView * vec4(Pworld, 1.0)).z;
+}
+
+void main() {
+    ivec2 pix  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(dstAO);
+    if (pix.x >= size.x || pix.y >= size.y) return;
+
+    vec2 uv = (vec2(pix) + 0.5) / vec2(size);
+
+    vec3  P = texture(gPosition, uv).xyz;
+    vec3  N = normalize(texture(gNormal, uv).xyz);
+    float d = camDepth(P);
+
+    if (dot(N, N) < 0.01) {
+        imageStore(dstAO, pix, vec4(imageLoad(srcAO, pix).r));
+        return;
+    }
+
+    float sSigma      = max(1.0, float(blurRadius) * 0.5);
+    float twoSspaceSq = 2.0 * sSigma * sSigma;
+
+    float sumA = 0.0;
+    float sumW = 0.0;
+
+    for (int i = -blurRadius; i <= blurRadius; ++i) {
+        ivec2 tapPix = ivec2(pix.x, clamp(pix.y + i, 0, size.y - 1));
+        vec2  tapUV  = (vec2(tapPix) + 0.5) / vec2(size);
+
+        float Ai = imageLoad(srcAO, tapPix).r;
+
+        vec3  Pi = texture(gPosition, tapUV).xyz;
+        vec3  Ni = normalize(texture(gNormal, tapUV).xyz);
+        float di = camDepth(Pi);
+
+        float Sspace = exp(-float(i * i) / twoSspaceSq);
+
+        float normalTerm = max(0.0, dot(Ni, N));
+        float dz = di - d;
+        float depthTerm = (1.0 / sqrt(2.0 * PI * sigma))
+                        * exp(-(dz * dz) / (2.0 * sigma));
+        float Srange = normalTerm * depthTerm;
+
+        float W = Sspace * Srange;
+        sumA += W * Ai;
+        sumW += W;
+    }
+
+    float outA = (sumW > 1e-6) ? (sumA / sumW) : imageLoad(srcAO, pix).r;
+    imageStore(dstAO, pix, vec4(outA));
+}
