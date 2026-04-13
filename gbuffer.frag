@@ -50,7 +50,10 @@ void main()
     }
 
     vec4 texColor = vec4(1.0);
-    if (hasTexture == 1) texColor = texture(tex, vUV * tile);
+    if (hasTexture == 1) {
+        texColor = texture(tex, vUV * tile);
+        texColor.rgb = pow(texColor.rgb, vec3(2.2));  // sRGB -> linear
+    }
 
     vec3 Kd = (hasTexture == 1) ? texColor.rgb : diffuse;
     vec3 Ks = specular;
@@ -61,8 +64,8 @@ void main()
         vec3 d = texture(normalMap, uv).xyz * 2.0 - vec3(1);
         N = normalize(d.x*T + d.y*B + d.z*N);
     }
-
-    G0_WorldPos = vec4(vWorldPos, 1.0);
+    float isGeometry = (objectId == skyId) ? 0.0 : 1.0;
+    G0_WorldPos = vec4(vWorldPos, isGeometry);
     G1_WorldN   = vec4(N, 1.0);
     G2_Kd       = vec4(Kd, 1.0);
     G3_KsAlpha  = vec4(Ks, alpha);

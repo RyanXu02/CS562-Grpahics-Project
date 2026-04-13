@@ -35,7 +35,7 @@ HDR::HDR(const std::string& path)
 
     glGenTextures(1, &textureId);   // Get an integer id for this texture from OpenGL
     glBindTexture(GL_TEXTURE_2D, textureId);
-    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)GL_RGBA, width, height, 0, GL_RGBA, GL_FLOAT, image);
+    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, image);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 10);
     glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);

@@ -16,6 +16,7 @@
 #include "object.h"
 #include "texture.h"
 #include "fbo.h"
+#include "HDR.h"
 
 enum ObjectIds {
     nullId	= 0,
@@ -72,9 +73,9 @@ public:
     std::vector<LocalLight> localLights;
     Shape* sphere_light = nullptr; // spheres for lights
     int localLightDebug = 0; // 1 for debug mode
-	int onlyLocalLights = 0; // 1 for only local lights mode
+    int onlyLocalLights = 0; // 1 for only local lights mode
     int localLightCount = 128;
-
+    int noDirectLight = 0; // 1 to disable direct lights (test diffuse IBL)
 
     int mode; // Extra mode indicator hooked up to number keys and sent to shader
     
@@ -96,9 +97,6 @@ public:
     ProceduralGround* proceduralground;
 
     // Shader programs
-
-	// non-deferred shading
-    ShaderProgram* lightingProgram;
 
     // shadows
     ShaderProgram* shadowProgram;
@@ -126,6 +124,12 @@ public:
     
     // Local lights
 	ShaderProgram* localLightProgram;
+
+    //HDR
+	HDR* hdr;
+    HDR* hdrIrr;
+	float exposure = 2.0f;
+    float teapotAlpha = 120.0f;
 
     // Options menu stuff
     bool show_demo_window;

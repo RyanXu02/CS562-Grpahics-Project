@@ -1,4 +1,3 @@
-
 ////////////////////////////////////////////////////////////////////////
 // The scene class contains all the parameters needed to define and
 // draw a simple scene, including:
@@ -138,6 +137,7 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
 // number of other parameters.
 void Scene::InitializeScene()
 {
+#pragma region Initialization
     glEnable(GL_DEPTH_TEST);
     CHECKERROR;
 
@@ -167,8 +167,11 @@ void Scene::InitializeScene()
     // @@ Perhaps initialize additional scene lighting values here. (lightVal, lightAmb)
     Light = glm::vec3(3.0, 3, 3);
 	Ambient = glm::vec3(0.4, 0.4, 0.4);
+    onlyLocalLights = 0;
+    noDirectLight = 0;
+#pragma endregion
 
-
+#pragma region LocalLights
     for (int i = 0; i < localLightCount; ++i)
     {
         LocalLight L;
@@ -211,7 +214,7 @@ void Scene::InitializeScene()
 
     z0 = lightDist - 60.0f;
 	z1 = lightDist + 60.0f;
-
+#pragma endregion
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
@@ -219,17 +222,9 @@ void Scene::InitializeScene()
     // Enable OpenGL depth-testing
     glEnable(GL_DEPTH_TEST);
 
+#pragma region Shaders
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
-    lightingProgram = new ShaderProgram();
-    lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
-    lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
-
-    glBindAttribLocation(lightingProgram->programId, 0, "vertex");
-    glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
-    glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
-    glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
-    lightingProgram->LinkProgram();
 
 	// shadow shader program
     shadowProgram = new ShaderProgram();
@@ -288,7 +283,39 @@ void Scene::InitializeScene()
 	localLightProgram->AddShader("local_light.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightProgram->programId, 0, "vertex");
 	localLightProgram->LinkProgram();
-    
+#pragma endregion
+
+#pragma region Hammersley
+    const int N_SAMPLES = 40;
+    struct {
+        float N;
+        float hammersley[2 * 100];  // sized for max 100 samples
+    } block;
+    block.N = float(N_SAMPLES);
+
+    int pos = 0;
+    for (int k = 0; k < N_SAMPLES; k++) {
+        float u = 0.0f;
+        int kk = k;
+        for (float p = 0.5f; kk; p *= 0.5f, kk >>= 1) {
+            if (kk & 1) u += p;
+        }
+        float v = (k + 0.5f) / float(N_SAMPLES);
+        block.hammersley[pos++] = u;
+        block.hammersley[pos++] = v;
+    }
+
+    unsigned int hammersleyBufferId;
+    glGenBuffers(1, &hammersleyBufferId);
+    const unsigned int bindpoint = 1;
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindpoint, hammersleyBufferId);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STATIC_DRAW);
+
+    int loc = glGetUniformBlockIndex(deferredProgram->programId, "HammersleyBlock");
+    glUniformBlockBinding(deferredProgram->programId, loc, bindpoint);
+#pragma endregion
+
+#pragma region objects and textures
     // create all the Polygon shapes
     proceduralground = new ProceduralGround(grndSize, 400,
                                      grndOctaves, grndFreq, grndPersistence,
@@ -314,6 +341,7 @@ void Scene::InitializeScene()
 
     // Ks values in a range appropriate range for BRDF calculations. (Phong needs 10* this.)
     const glm::vec3 noSpec(0.0, 0.0, 0.0);
+    const glm::vec3 lowSpec(0.01, 0.01, 0.01);
     const glm::vec3 brightSpec(0.03, 0.03, 0.03);
 	const glm::vec3 evenBrighterSpec(0.1, 0.1, 0.1);
     const glm::vec3 brightestSpec(1.0, 1.0, 1.0);
@@ -345,6 +373,8 @@ void Scene::InitializeScene()
 	Texture* woodNormalMap = new Texture("textures/Brazilian_rosewood_pxr128_normal.png");
     Texture* waterNormalMap = new Texture("Textures/ripples_normalmap.png");
 
+    hdr = new HDR("skys/Newport_Loft_Ref.hdr");
+    hdrIrr = new HDR("skys/Newport_Loft_Ref.irr.hdr");
 
     // @@ To change an object's surface parameters (Kd, Ks, or alpha),
     // modify the following lines.
@@ -352,11 +382,11 @@ void Scene::InitializeScene()
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
     room       = new Object(RoomPolygons, roomId, brickColor, noSpec, 1, brickTexture, brickNormalMap);
-    floor      = new Object(FloorPolygons, floorId, floorColor, brightSpec, 10, floorTexture, floorNormalMap);
-    teapot     = new Object(TeapotPolygons, teapotId, brassColor, evenBrighterSpec, 120, teapotTexture, teapotNormalMap);
+    floor      = new Object(FloorPolygons, floorId, floorColor, lowSpec, 10, floorTexture, floorNormalMap);
+    teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120, teapotTexture, teapotNormalMap);
     teapot2    = new Object(TeapotPolygons, teapotId, brassColor, brightestSpec, 120, teapotTexture, teapotNormalMap);
 	teapot3    = new Object(TeapotPolygons, teapotId, brassColor, noSpec, 120, teapotTexture, teapotNormalMap);
-    podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), brightSpec, 10, rockTexture, rockNormalMap); 
+    podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), lowSpec, 10, rockTexture, rockNormalMap);
     sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, skyTexture);
     objectRoot->add(sky, Scale(2000.0, 2000.0, 2000.0));
     ground     = new Object(GroundPolygons, groundId, grassColor, noSpec, 1, grassTexture, grassNormalMap);
@@ -410,6 +440,7 @@ void Scene::InitializeScene()
         room->add(rightFrame, Translate( 1.5, 9.85, 1.)*Scale(0.8, 0.8, 0.8)); }
 
     CHECKERROR;
+#pragma endregion
 
     // Options menu stuff
     show_demo_window = true;
@@ -421,97 +452,135 @@ void Scene::DrawMenu()
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // UI toggles/state
+    // UI toggles
     static bool showStatsWindow = false;
-    static bool showControlsWindow = false;
+    static bool showCameraWindow = false;
     static bool showLightingWindow = false;
+    static bool showMaterialWindow = false;
+    static bool showShadowWindow = false;
     static bool wireframe = false;
     static bool vsync = true;
     static bool MSAA = true;
-	static bool showDemoWindow = false;
+    static bool showDemoWindow = false;
+
     if (ImGui::BeginMainMenuBar()) {
-        // This menu demonstrates how to provide the user a list of toggleable settings.
-        if (ImGui::BeginMenu("Objects")) {
-            if (ImGui::MenuItem("Draw spheres", "", spheres->drawMe))  {spheres->drawMe ^= true; }
-            if (ImGui::MenuItem("Draw walls", "", room->drawMe))       {room->drawMe ^= true; }
-            if (ImGui::MenuItem("Draw ground/sea", "", ground->drawMe)){ground->drawMe ^= true;
-                							sea->drawMe = ground->drawMe;}
-            ImGui::EndMenu(); }
-        // camera controls
+
+        // scene visibility
+        if (ImGui::BeginMenu("Scene")) {
+            if (ImGui::MenuItem("Draw spheres", "", spheres->drawMe)) { spheres->drawMe ^= true; }
+            if (ImGui::MenuItem("Draw walls", "", room->drawMe)) { room->drawMe ^= true; }
+            if (ImGui::MenuItem("Draw ground/sea", "", ground->drawMe)) {
+                ground->drawMe ^= true;
+                sea->drawMe = ground->drawMe;
+            }
+			if (ImGui::MenuItem("Draw floor", "", floor->drawMe)) { floor->drawMe ^= true; }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Only local lights", "", onlyLocalLights)) { onlyLocalLights ^= true; }
+            if (ImGui::MenuItem("Disable direct lights (IBL only)", "", noDirectLight)) { noDirectLight ^= true; }
+            ImGui::EndMenu();
+        }
+
+        // camera
         if (ImGui::BeginMenu("View")) {
             bool isFirstPerson = transformation_mode;
             if (ImGui::MenuItem("First-person", "", isFirstPerson)) { transformation_mode = true; }
             if (ImGui::MenuItem("Orbit (world)", "", !isFirstPerson)) { transformation_mode = false; }
             if (ImGui::MenuItem("Reset camera")) {
-                spin = 0.0f;
-                tilt = 30.0f;
-                tx = 0.0f;
-                ty = 0.0f;
-                zoom = 25.0f;
-                ry = 0.4f;
-                front = 0.5f;
-                back = 5000.0f;
+                spin = 0.0f;  tilt = 30.0f;
+                tx = 0.0f;    ty = 0.0f;
+                zoom = 25.0f; ry = 0.4f;
+                front = 0.5f; back = 5000.0f;
                 eye = glm::vec3(0.0f, -20.0f, 0.0f);
                 speed = 10.0f;
             }
             ImGui::EndMenu();
         }
-        // utility
-        if (ImGui::BeginMenu("Debug")) {
-            if (ImGui::MenuItem("Draw local light spheres", "", localLightDebug)) {
-                localLightDebug ^= true;
-            }
-            if (ImGui::MenuItem("Only use local lights", "", onlyLocalLights)) {
-                onlyLocalLights ^= true;
-            }
+
+        // render mode
+        if (ImGui::BeginMenu("Render Mode")) {
+            if (ImGui::MenuItem("Default", "", mode == 0)) { mode = 0; }
+            ImGui::Separator();
+            ImGui::TextDisabled("G-Buffer");
+            if (ImGui::MenuItem("  WorldPos", "", mode == 1)) { mode = 1; }
+            if (ImGui::MenuItem("  Normal", "", mode == 2)) { mode = 2; }
+            if (ImGui::MenuItem("  Kd", "", mode == 3)) { mode = 3; }
+            if (ImGui::MenuItem("  Ks / Alpha", "", mode == 4)) { mode = 4; }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Deferred + Local lights", "", mode == 5)) { mode = 5; }
+            ImGui::Separator();
+            ImGui::TextDisabled("Shadow Map");
+            if (ImGui::MenuItem("  Before blur", "", mode == 6)) { mode = 6; }
+            if (ImGui::MenuItem("  After blur", "", mode == 7)) { mode = 7; }
+            ImGui::EndMenu();
+        }
+
+        // windows
+        if (ImGui::BeginMenu("Windows")) {
+            if (ImGui::MenuItem("Lighting", "", showLightingWindow)) { showLightingWindow ^= true; }
+            if (ImGui::MenuItem("Material", "", showMaterialWindow)) { showMaterialWindow ^= true; }
+            if (ImGui::MenuItem("Shadows", "", showShadowWindow)) { showShadowWindow ^= true; }
+            if (ImGui::MenuItem("Camera", "", showCameraWindow)) { showCameraWindow ^= true; }
+            if (ImGui::MenuItem("Stats", "", showStatsWindow)) { showStatsWindow ^= true; }
+            ImGui::Separator();
+            if (ImGui::MenuItem("ImGui Demo", "", showDemoWindow)) { showDemoWindow ^= true; }
+            ImGui::EndMenu();
+        }
+
+        // gl settings
+        if (ImGui::BeginMenu("Settings")) {
             if (ImGui::MenuItem("VSync", "", vsync)) {
                 vsync ^= true;
                 glfwSwapInterval(vsync ? 1 : 0);
             }
             if (ImGui::MenuItem("MSAA", "", MSAA)) {
                 MSAA ^= true;
-                if (MSAA)
-                    glEnable(GL_MULTISAMPLE);
-                else
-                    glDisable(GL_MULTISAMPLE);
-			}
-            if (ImGui::MenuItem("Stats window", "", showStatsWindow)) { showStatsWindow ^= true; }
-            if (ImGui::MenuItem("Controls window", "", showControlsWindow)) { showControlsWindow ^= true; }
-            if (ImGui::MenuItem("Lighting window", "", showLightingWindow)) { showLightingWindow ^= true; }
-			if (ImGui::MenuItem("Show ImGui demo", "", showDemoWindow)) { showDemoWindow ^= true; }
+                if (MSAA) glEnable(GL_MULTISAMPLE);
+                else      glDisable(GL_MULTISAMPLE);
+            }
+            if (ImGui::MenuItem("Draw light spheres", "", localLightDebug)) {
+                localLightDebug ^= true;
+            }
             ImGui::EndMenu();
         }
-        // This menu demonstrates how to provide the user a choice
-        // among a set of choices.  The current choice is stored in a
-        // variable named "mode" in the application, and sent to the
-        // shader to be used as you wish.
-        if (ImGui::BeginMenu("Render Mode ")) {
-            if (ImGui::MenuItem("Forward shading", "", mode == 0)) { mode = 0; }
 
-            // G-buffer debug views (mode 1..4)
-            if (ImGui::MenuItem("GBuffer: WorldPos", "", mode == 1)) { mode = 1; }
-            if (ImGui::MenuItem("GBuffer: Normal", "", mode == 2)) { mode = 2; }
-            if (ImGui::MenuItem("GBuffer: Kd", "", mode == 3)) { mode = 3; }
-            if (ImGui::MenuItem("GBuffer: Ks/Alpha", "", mode == 4)) { mode = 4; }
+        ImGui::EndMainMenuBar();
+    }
 
-            // Deferred shading + local lights + shadows
-            if (ImGui::MenuItem("Deferred + Local lights", "", mode == 5)) { mode = 5; }
-            // shadow map debug views
-            if (ImGui::MenuItem("Shadow map (before blur)", "", mode == 6)) { mode = 6; }
-            if (ImGui::MenuItem("Shadow map (after blur)", "", mode == 7)) { mode = 7; }
-            // shadow blur radius slider
-            ImGui::SliderInt("Shadow blur radius", &blurRadius, 1, 100);
+    // lighting window
+    if (showLightingWindow) {
+        ImGui::Begin("Lighting", &showLightingWindow);
+        ImGui::SliderFloat("Distance", &lightDist, 1.0f, 1000.0f);
+        ImGui::SliderFloat("Spin (deg)", &lightSpin, -180.0f, 180.0f);
+        ImGui::SliderFloat("Tilt (deg)", &lightTilt, -89.9f, 89.9f);
+        ImGui::Separator();
+        ImGui::Text("Tone Mapping");
+        ImGui::SliderFloat("Exposure", &exposure, 0.01f, 20.0f);
+        ImGui::End();
+        z0 = lightDist - 60.0f;
+        z1 = lightDist + 60.0f;
+    }
 
+    // material window
+    if (showMaterialWindow) {
+        ImGui::Begin("Material", &showMaterialWindow);
+        ImGui::Text("Teapots");
+        ImGui::SliderFloat("Alpha (shininess)", &teapotAlpha, 1.0f, 500.0f);
+        teapot->shininess = teapotAlpha;
+        teapot2->shininess = teapotAlpha;
+        teapot3->shininess = teapotAlpha;
+        ImGui::End();
+    }
 
-            ImGui::EndMenu();
-        }
-        
-        ImGui::EndMainMenuBar(); }
-  
+    // shaodw window
+    if (showShadowWindow) {
+        ImGui::Begin("Shadows", &showShadowWindow);
+        ImGui::SliderInt("Blur radius", &blurRadius, 1, 100);
+        ImGui::End();
+    }
 
-    // camera contrls window
-    if (showControlsWindow) {
-        ImGui::Begin("Camera Controls");
+    // camera window
+    if (showCameraWindow) {
+        ImGui::Begin("Camera", &showCameraWindow);
         ImGui::Text("Mode: %s", transformation_mode ? "First-person" : "Orbit (world)");
         ImGui::SliderFloat("Spin (deg)", &spin, -180.0f, 180.0f);
         ImGui::SliderFloat("Tilt (deg)", &tilt, -89.9f, 89.9f);
@@ -529,20 +598,9 @@ void Scene::DrawMenu()
         ImGui::End();
     }
 
-    // lighting controls window
-    if (showLightingWindow) {
-        ImGui::Begin("Lighting");
-        ImGui::SliderFloat("Light distance", &lightDist, 1.0f, 1000.0f);
-        ImGui::SliderFloat("Light spin (deg)", &lightSpin, -180.0f, 180.0f);
-        ImGui::SliderFloat("Light tilt (deg)", &lightTilt, -89.9f, 89.9f);
-        ImGui::End();
-		z0 = lightDist - 60.0f;
-		z1 = lightDist + 60.0f;
-    }
-
     // stats window
     if (showStatsWindow) {
-        ImGui::Begin("Stats");
+        ImGui::Begin("Stats", &showStatsWindow);
         ImGuiIO& io = ImGui::GetIO();
         ImGui::Text("FPS: %.1f (%.2f ms)", io.Framerate, (io.Framerate > 0.0f) ? (1000.0f / io.Framerate) : 0.0f);
         ImGui::Text("Viewport: %d x %d", width, height);
@@ -551,10 +609,12 @@ void Scene::DrawMenu()
         ImGui::Text("Local light count: %d", localLightCount);
         ImGui::End();
     }
-	// ImGui demo window
+
+    // demo
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
+
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
@@ -591,6 +651,7 @@ void Scene::BuildTransforms()
 // goals.)
 void Scene::DrawScene()
 {
+#pragma region Setup
     // Set the viewport
     glfwGetFramebufferSize(window, &width, &height);
     glViewport(0, 0, width, height);
@@ -648,7 +709,7 @@ void Scene::DrawScene()
 
     // The lighting algorithm needs the inverse of the WorldView matrix
     WorldInverse = glm::inverse(WorldView);
-    
+#pragma endregion
 
     ////////////////////////////////////////////////////////////////////////////////
     // Anatomy of a pass:
@@ -667,6 +728,7 @@ void Scene::DrawScene()
     ////////////////////////////////////////////////////////////////////////////////
     // Shadow pass
     ////////////////////////////////////////////////////////////////////////////////
+#pragma region ShadowPass
     LightView = LookAt(lightPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 0.0, 1.0));
 	LightProj = Perspective(40.0/lightDist, 40.0f/lightDist, front, back);
 
@@ -702,10 +764,11 @@ void Scene::DrawScene()
 
 	shadowFBO.UnbindFBO();
     shadowProgram->UnuseShader();
-
+#pragma endregion
     ////////////////////////////////////////////////////////////////////////////////
     // Blur pass  (horizontal then vertical)
     ////////////////////////////////////////////////////////////////////////////////
+#pragma region BlurPass
     // before blur debug view
     if (mode == 6) {
         glViewport(0, 0, width, height);
@@ -762,10 +825,11 @@ void Scene::DrawScene()
         shadowDebugProgram->UnuseShader();
         return;
     }
-
+#pragma endregion
     ////////////////////////////////////////////////////////////////////////////////
     // G-buffer pass
     ////////////////////////////////////////////////////////////////////////////////
+#pragma region GbufferPass
     gbufferProgram->UseShader();
     programId = gbufferProgram->programId;
 
@@ -825,11 +889,11 @@ void Scene::DrawScene()
         gbufferDebugProgram->UnuseShader();
         return;
     }
+#pragma endregion
 
     ////////////////////////////////////////////////////////////////////////////////
     // Deferred shading pass + local lights
     ////////////////////////////////////////////////////////////////////////////////
-    if (mode == 5)
     {
         glViewport(0, 0, width, height);
         glDisable(GL_DEPTH_TEST);
@@ -846,6 +910,10 @@ void Scene::DrawScene()
         gbufferFBO.BindTexture(3, 3, programId, "gKsAlpha");
         shadowFBO.BindTexture(0, 4, programId, "shadowMap");
 
+        // bind HDR
+        hdr->BindTexture(5, programId, "environmentMap");
+        hdrIrr->BindTexture(6, programId, "irradianceMap");
+
 		// turn off lights if only local lights mode is on 
         const glm::vec3 nothing(0.0f, 0.0f, 0.0f);
 		if (onlyLocalLights) {
@@ -856,121 +924,80 @@ void Scene::DrawScene()
             glUniform3fv(glGetUniformLocation(programId, "Light"), 1, (float*)&Light);
 			glUniform3fv(glGetUniformLocation(programId, "Ambient"), 1, (float*)&Ambient);
         }
+        // light position for specular and shadows
         glUniform3fv(glGetUniformLocation(programId, "lightPos"), 1, (float*)&lightPos);
         glm::vec3 eyePosWS = glm::vec3(WorldInverse * glm::vec4(0, 0, 0, 1));
         glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, (float*)&eyePosWS);
         glUniformMatrix4fv(glGetUniformLocation(programId, "ShadowMatrix"), 1, GL_FALSE, glm::value_ptr(ShadowMatrix));
-        
+		
+        // z0 and z1 for reconstructing world position from depth in the shader
         loc = glGetUniformLocation(deferredProgram->programId, "z0");
         glUniform1f(loc, z0);
         loc = glGetUniformLocation(deferredProgram->programId, "z1");
         glUniform1f(loc, z1);
+
+        glUniform1i(glGetUniformLocation(programId, "noDirectLight"), noDirectLight);
+        loc = glGetUniformLocation(deferredProgram->programId, "exposure");
+        glUniform1f(loc, exposure);
 
         // draw full-screen triangle to apply lighting to all pixels
         glBindVertexArray(deferredVAO);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
 
+        hdr->UnbindTexture(5);
+        hdrIrr->UnbindTexture(6);
+        shadowFBO.UnbindTexture(4);
+        gbufferFBO.UnbindTexture(3);
+        gbufferFBO.UnbindTexture(2);
+        gbufferFBO.UnbindTexture(1);
+        gbufferFBO.UnbindTexture(0);
+
         deferredProgram->UnuseShader();
 		////////////////////////////////////////////////////////////////////////////////
         // local lights pass
         ////////////////////////////////////////////////////////////////////////////////
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
+        if (!noDirectLight){
+            glDisable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
 
-        localLightProgram->UseShader();
-        programId = localLightProgram->programId;
-        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldProj"), 1, GL_FALSE, glm::value_ptr(WorldProj));
-        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldView"), 1, GL_FALSE, glm::value_ptr(WorldView));
-        glUniform1i(glGetUniformLocation(programId, "debugDrawSpheres"), localLightDebug);
-        // bind G-buffer
-        gbufferFBO.BindTexture(0, 0, programId, "gWorldPos");
-        gbufferFBO.BindTexture(1, 1, programId, "gNormal");
-        gbufferFBO.BindTexture(2, 2, programId, "gKd");
-        gbufferFBO.BindTexture(3, 3, programId, "gKsAlpha");
-        glUniform2f(glGetUniformLocation(programId, "screenSize"),
-            (float)width, (float)height);
-        glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, &eyePosWS[0]);
+            localLightProgram->UseShader();
+            programId = localLightProgram->programId;
+            glUniformMatrix4fv(glGetUniformLocation(programId, "WorldProj"), 1, GL_FALSE, glm::value_ptr(WorldProj));
+            glUniformMatrix4fv(glGetUniformLocation(programId, "WorldView"), 1, GL_FALSE, glm::value_ptr(WorldView));
+            glUniform1i(glGetUniformLocation(programId, "debugDrawSpheres"), localLightDebug);
+            // bind G-buffer
+            gbufferFBO.BindTexture(0, 0, programId, "gWorldPos");
+            gbufferFBO.BindTexture(1, 1, programId, "gNormal");
+            gbufferFBO.BindTexture(2, 2, programId, "gKd");
+            gbufferFBO.BindTexture(3, 3, programId, "gKsAlpha");
+            glUniform2f(glGetUniformLocation(programId, "screenSize"),
+                (float)width, (float)height);
+            glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, &eyePosWS[0]);
 
-        for (const LocalLight& L : localLights)
-        {
-            glm::mat4 ModelTr = glm::translate(glm::mat4(1), L.position) * glm::scale(glm::mat4(1), glm::vec3(L.radius));
-            glUniformMatrix4fv(glGetUniformLocation(programId, "ModelTr"), 1, GL_FALSE, glm::value_ptr(ModelTr));
-            glUniform3fv(glGetUniformLocation(programId, "lightPos"), 1, &L.position[0]);
-            glUniform3fv(glGetUniformLocation(programId, "lightColor"), 1, &L.color[0]);
-            glUniform1f(glGetUniformLocation(programId, "lightRadius"), L.radius);
+            for (const LocalLight& L : localLights)
+            {
+                glm::mat4 ModelTr = glm::translate(glm::mat4(1), L.position) * glm::scale(glm::mat4(1), glm::vec3(L.radius));
+                glUniformMatrix4fv(glGetUniformLocation(programId, "ModelTr"), 1, GL_FALSE, glm::value_ptr(ModelTr));
+                glUniform3fv(glGetUniformLocation(programId, "lightPos"), 1, &L.position[0]);
+                glUniform3fv(glGetUniformLocation(programId, "lightColor"), 1, &L.color[0]);
+                glUniform1f(glGetUniformLocation(programId, "lightRadius"), L.radius);
 
-            sphere_light->DrawVAO();
+                sphere_light->DrawVAO();
+            }
+
+            localLightProgram->UnuseShader();
+
+            glDisable(GL_BLEND);
+            glEnable(GL_DEPTH_TEST);
+            glCullFace(GL_BACK);
         }
-
-        localLightProgram->UnuseShader();
-
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-        glCullFace(GL_BACK);
-
-        return;
     }
 
     ////////////////////////////////////////////////////////////////////////////////
-    // Non-deferred shading pass
-    ////////////////////////////////////////////////////////////////////////////////
-
-
-
-    // Choose the lighting shader
-    lightingProgram->UseShader();
-    programId = lightingProgram->programId;
-
-    // Set the viewport, and clear the screen
-    glViewport(0, 0, width, height);
-    glClearColor(0.5, 0.5, 0.5, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
-
-
-    // @@ The scene specific parameters (uniform variables) used by
-    // the shader are set here.  Object specific parameters are set in
-    // the Draw procedure in object.cpp
-    
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(programId, "WorldView");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));   
-    loc = glGetUniformLocation(programId, "mode");
-    glUniform1i(loc, mode);
-
-    loc = glGetUniformLocation(programId, "Light");
-    glUniform3fv(loc, 1, &(Light[0]));
-    loc = glGetUniformLocation(programId, "Ambient");
-    glUniform3fv(loc, 1, &(Ambient[0]));
-
-    loc = glGetUniformLocation(programId, "time");
-    glUniform1f(loc, currentTime);
-
-	loc = glGetUniformLocation(programId, "ShadowMatrix");
-	glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
-
-    shadowFBO.BindTexture(0, 3, programId, "shadowMap");
-
-    CHECKERROR;
-
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    objectRoot->Draw(lightingProgram, Identity);
-    CHECKERROR; 
-
-	shadowFBO.UnbindTexture(3);
-    // Turn off the shader
-    lightingProgram->UnuseShader();
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // End of Lighting pass
+    // End of DrawScene
     ////////////////////////////////////////////////////////////////////////////////
 }
