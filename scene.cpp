@@ -220,8 +220,8 @@ void Scene::InitializeScene()
 	localLights.push_back(L3);
 	localLights.push_back(L4);
 
-    z0 = lightDist - 60.0f;
-	z1 = lightDist + 60.0f;
+    z0 = lightDist - 120.0f;
+	z1 = lightDist + 120.0f;
 #pragma endregion
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
@@ -1009,8 +1009,7 @@ void Scene::DrawScene()
     glBindImageTexture(1, aoBlurFBO.textureID[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
     gbufferFBO.BindTexture(0, 2, aoBlurHProgram->programId, "gPosition");
     gbufferFBO.BindTexture(1, 3, aoBlurHProgram->programId, "gNormal");
-    glUniformMatrix4fv(glGetUniformLocation(aoBlurHProgram->programId, "WorldView"),
-        1, GL_FALSE, glm::value_ptr(WorldView));
+    glUniformMatrix4fv(glGetUniformLocation(aoBlurHProgram->programId, "WorldView"), 1, GL_FALSE, glm::value_ptr(WorldView));
     glUniform1i(glGetUniformLocation(aoBlurHProgram->programId, "blurRadius"), aoBlurRadius);
     glUniform1f(glGetUniformLocation(aoBlurHProgram->programId, "sigma"), aoSigma);
     glDispatchCompute((width + 127) / 128, height, 1);

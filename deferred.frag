@@ -49,9 +49,9 @@ vec3 microfacetBRDF(vec3 L, vec3 V, vec3 N, vec3 Kd, vec3 Ks, float alpha)
 
     float D = ((alpha + 2.0) / (2.0 * PI)) * pow(NdotH, alpha);
     vec3 F = Ks + (1.0 - Ks) * pow(1.0 - LdotH, 5.0);
-    float G = 1.0 / max(LdotH * LdotH, 1e-4);
+    float G = 1.0 / max(LdotH * LdotH, 0.01);
     vec3  diffuse  = Kd / PI;
-    vec3  specular = (D * F * G) / max(4.0 * NdotL * NdotV, 1e-4);
+    vec3  specular = (dot(Ks, Ks) > 0.0) ? (D * F * G) / max(4.0 * NdotL * NdotV, 0.01) : vec3(0.0);
 
     return diffuse + specular;
 }
@@ -97,9 +97,9 @@ vec3 specularIBL(vec3 N_vec, vec3 V, vec3 Ks, float alpha) {
         vec3 Li = textureLod(environmentMap, uvOf(wk), level).rgb;
 
         vec3  F = Ks + (1.0 - Ks) * pow(1.0 - LdotH, 5.0);
-        float G = 1.0 / max(LdotH * LdotH, 1e-4);
+        float G = 1.0 / max(LdotH * LdotH, 0.01);
 
-        sum += Li * G * F / max(4.0 * NdotV, 1e-4);
+        sum += Li * G * F / max(4.0 * NdotV, 0.01);
     }
     return sum / N;
 }
@@ -204,9 +204,9 @@ void main()
     vec3 directLight = (noDirectLight == 0) ? Light * LN * brdf * visibility : vec3(0.0);
     vec3 irradiance  = texture(irradianceMap, uvOf(N)).rgb;
     vec3 diffuseIBL  = (Kd / PI) * irradiance;
-    vec3 specIBL = specularIBL(N, V, Ks, alpha);
+    vec3 specIBL = (dot(Ks, Ks) > 0.0) ? specularIBL(N, V, Ks, alpha) : vec3(0.0);
     float ao = texture(aoMap, vUV).r;
-    vec3 C = directLight + ao*(diffuseIBL + specIBL);
+    vec3 C = ao*(directLight + diffuseIBL + specIBL);
 
     vec3 mapped = (exposure * C) / (exposure * C + vec3(1.0));
     vec3 display = pow(mapped, vec3(1.0 / 2.2));
