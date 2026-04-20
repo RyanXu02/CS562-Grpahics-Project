@@ -484,7 +484,7 @@ void Scene::InitializeScene()
     spheres->drawMe = true;
 #else
     spheres->drawMe = true;
-    room->drawMe = false;
+    room->drawMe = true;
 	ground->drawMe = false;
 	sea->drawMe = false;
 #endif
@@ -629,7 +629,7 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Shadows", "", showShadowWindow)) { showShadowWindow ^= true; }
             if (ImGui::MenuItem("Ambient Occlusion", "", showAOWindow)) { showAOWindow ^= true; }
             if (ImGui::MenuItem("Camera", "", showCameraWindow)) { showCameraWindow ^= true; }
-            if (ImGui::MenuItem("Contour", "", showContourWindow)) { showContourWindow ^= true; }
+            if (ImGui::MenuItem("Pencil", "", showContourWindow)) { showContourWindow ^= true; }
             if (ImGui::MenuItem("Stats", "", showStatsWindow)) { showStatsWindow ^= true; }
             ImGui::Separator();
             if (ImGui::MenuItem("ImGui Demo", "", showDemoWindow)) { showDemoWindow ^= true; }
@@ -712,19 +712,31 @@ void Scene::DrawMenu()
     // contour window
     if (showContourWindow) {
         ImGui::Begin("Contour", &showContourWindow);
-        ImGui::Text("Edge Detection");
+        ImGui::Text("Contour");
         ImGui::SliderFloat("Normal threshold", &contourNormalThreshold, 0.0f, 1.0f, "%.2f");
         ImGui::SliderFloat("Depth threshold", &contourDepthThreshold, 0.01f, 5.0f, "%.2f");
-        ImGui::Separator();
-        ImGui::Text("Pencil Shake");
         ImGui::SliderFloat("Shake amplitude", &contourShakeAmp, 0.0f, 0.02f, "%.4f");
         ImGui::SliderFloat("Shake frequency", &contourShakeFreq, 1.0f, 100.0f, "%.1f");
         ImGui::SliderInt("Num shakes", &contourNumShakes, 1, 10);
         ImGui::SliderFloat("Pencil tile", &contourPencilTile, 0.5f, 20.0f, "%.1f");
         ImGui::Separator();
-        if (ImGui::Button("View contour buffer")) { mode = 9; }
+        ImGui::Text("Interior Shading");
+        ImGui::SliderFloat("Interior pencil tile", &interiorPencilTile, 0.5f, 20.0f, "%.1f");
+        ImGui::SliderFloat("Paper strength", &interiorPaperStrength, 0.0f, 0.2f, "%.4f");
+        ImGui::SliderFloat("Paper tile", &interiorPaperTile, 0.5f, 10.0f, "%.1f");
+        ImGui::SliderFloat("Cross-hatch below", &interiorCrossHatchBelow, 0.0f, 1.0f, "%.2f");
+        ImGui::Separator();
+        ImGui::Text("Composition");
+        ImGui::SliderFloat("Contrast", &pencilContrast, 0.0f, 1.0f, "%.2f");
+        ImGui::ColorEdit3("Paper color", (float*)&pencilPaperColor);
+        ImGui::Separator();
+        if (ImGui::Button("View contour buffer")) { mode = 7; pencilMode = 1; }
         ImGui::SameLine();
-        if (mode == 9 && ImGui::Button("Back to default")) { mode = 0; }
+        if (ImGui::Button("View interior buffer")) { mode = 8; pencilMode = 1; }
+        ImGui::SameLine();
+        if (ImGui::Button("View Combined")) { mode = 9; pencilMode = 1; }
+        ImGui::SameLine();
+        if ((mode == 7 || mode == 8 || mode == 9) && ImGui::Button("Back to default")) { mode = 0; pencilMode = 0; }
         ImGui::End();
     }
 
