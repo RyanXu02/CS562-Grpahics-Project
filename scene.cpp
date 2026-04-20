@@ -95,7 +95,7 @@ Object* SphereOfSpheres(Shape* SpherePolygons)
             glm::vec3 hue = HSV2RGB(angle/360.0, 1.0f-2.0f*row/PI, 1.0f);
 
             Object* sp = new Object(SpherePolygons, spheresId,
-                                    hue, glm::vec3(1.0, 1.0, 1.0), 120.0);
+                                    hue, glm::vec3(0.0001, 0.0001, 0.0001), 1000.0);
             float s = sin(row);
             float c = cos(row);
             ob->add(sp, Rotate(2,angle)*Translate(c,0,s)*Scale(0.075*c,0.075*c,0.075*c));
@@ -168,6 +168,7 @@ void Scene::InitializeScene()
     Light = glm::vec3(3.0, 3, 3);
 	Ambient = glm::vec3(0.4, 0.4, 0.4);
     onlyLocalLights = 0;
+	noLocalLight = 1;
     noDirectLight = 0;
     // ao parameters
     aoRadius = 2.0f;
@@ -265,6 +266,7 @@ void Scene::InitializeScene()
     glBindAttribLocation(gbufferProgram->programId, 1, "vertexNormal");
     glBindAttribLocation(gbufferProgram->programId, 2, "vertexTexture");
     glBindAttribLocation(gbufferProgram->programId, 3, "vertexTangent");
+    glBindAttribLocation(gbufferProgram->programId, 4, "vertexCurvDir");
     gbufferProgram->LinkProgram();
 
 	// gbuffer debug shader program
@@ -306,6 +308,45 @@ void Scene::InitializeScene()
     aoDebugProgram->AddShader("gbuffer_debug.vert", GL_VERTEX_SHADER);
     aoDebugProgram->AddShader("ao_debug.frag", GL_FRAGMENT_SHADER);
     aoDebugProgram->LinkProgram();
+
+
+#pragma region pencil rendering
+    // Pencil contour pass
+    contourProgram = new ShaderProgram();
+    contourProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);
+    contourProgram->AddShader("contour.frag", GL_FRAGMENT_SHADER);
+    contourProgram->LinkProgram();
+    contourDebugProgram = new ShaderProgram();
+    contourDebugProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);
+    contourDebugProgram->AddShader("contour_debug.frag", GL_FRAGMENT_SHADER);
+    contourDebugProgram->LinkProgram();
+    // AO FBO has R32F single color attachment no depth
+    contourFBO.CreateAoFBO(width, height);
+    CHECKERROR;
+
+    // Pencil interior pass
+    interiorProgram = new ShaderProgram();
+    interiorProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);
+    interiorProgram->AddShader("interior.frag", GL_FRAGMENT_SHADER);
+    interiorProgram->LinkProgram();
+    interiorDebugProgram = new ShaderProgram();
+    interiorDebugProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);
+    interiorDebugProgram->AddShader("interior_debug.frag", GL_FRAGMENT_SHADER);
+    interiorDebugProgram->LinkProgram();
+    // AO FBO has R32F single color attachment no depth
+    interiorFBO.CreateAoFBO(width, height);
+    CHECKERROR;
+
+    // Pencil composition
+    pencilCompositeProgram = new ShaderProgram();
+    pencilCompositeProgram->AddShader("deferred.vert", GL_VERTEX_SHADER);
+    pencilCompositeProgram->AddShader("pencil_composite.frag", GL_FRAGMENT_SHADER);
+    pencilCompositeProgram->LinkProgram();
+    // 
+    deferredOutputFBO.CreateFBO(width, height);
+    CHECKERROR;
+
+#pragma endregion
 
 	// local light shader program
 	localLightProgram = new ShaderProgram();
@@ -359,6 +400,16 @@ void Scene::InitializeScene()
     Shape* QuadPolygons = new Quad();
     Shape* SeaPolygons = new Plane(2000.0, 50);
     Shape* GroundPolygons = proceduralground;
+
+    AttachCurvatureAttribute(TeapotPolygons);
+    AttachCurvatureAttribute(BoxPolygons);
+    AttachCurvatureAttribute(SpherePolygons);
+	AttachCurvatureAttribute(RoomPolygons);
+	AttachCurvatureAttribute(FloorPolygons);
+	AttachCurvatureAttribute(QuadPolygons);
+	AttachCurvatureAttribute(SeaPolygons);
+	AttachCurvatureAttribute(GroundPolygons);
+
     sphere_light = new Sphere(32);
 
     // Various colors used in the subsequent models
@@ -406,13 +457,18 @@ void Scene::InitializeScene()
     hdr = new HDR("skys/Newport_Loft_Ref.hdr");
     hdrIrr = new HDR("skys/Newport_Loft_Ref.irr.hdr");
 
+    pencilTones3D = CreatePencilTonesTexture(256, 32);
+    paperNormalMap = CreatePaperNormalMap(512);
+    contourPencilTex = CreateContourPencilTex(256, 256);
+    CHECKERROR;
+
     // @@ To change an object's surface parameters (Kd, Ks, or alpha),
     // modify the following lines.
     
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
     room       = new Object(RoomPolygons, roomId, brickColor, noSpec, 1, brickTexture, brickNormalMap);
-    floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 10, floorTexture, floorNormalMap);
+    floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 1, floorTexture, floorNormalMap);
     teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120, teapotTexture, teapotNormalMap);
     teapot2    = new Object(TeapotPolygons, teapotId, brassColor, brightestSpec, 120, teapotTexture, teapotNormalMap);
 	teapot3    = new Object(TeapotPolygons, teapotId, brassColor, noSpec, 120, teapotTexture, teapotNormalMap);
@@ -420,7 +476,7 @@ void Scene::InitializeScene()
     sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, skyTexture);
     objectRoot->add(sky, Scale(2000.0, 2000.0, 2000.0));
     ground     = new Object(GroundPolygons, groundId, grassColor, noSpec, 1, grassTexture, grassNormalMap);
-    sea        = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120, skyTexture, waterNormalMap);
+    sea = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120, nullptr, waterNormalMap);
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons, woodTexture, woodNormalMap, displayTexture1);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons, woodTexture, woodNormalMap);
     spheres    = SphereOfSpheres(SpherePolygons);
@@ -501,6 +557,7 @@ void Scene::DrawMenu()
     static bool showMaterialWindow = false;
     static bool showShadowWindow = false;
     static bool showAOWindow = false;
+    static bool showContourWindow = false;
     static bool wireframe = false;
     static bool vsync = true;
     static bool MSAA = true;
@@ -518,8 +575,11 @@ void Scene::DrawMenu()
             }
 			if (ImGui::MenuItem("Draw floor", "", floor->drawMe)) { floor->drawMe ^= true; }
             ImGui::Separator();
+            if (ImGui::MenuItem("Pencil mode", "", (bool)pencilMode)) { pencilMode ^= 1; }
+            ImGui::Separator();
             if (ImGui::MenuItem("Only local lights", "", onlyLocalLights)) { onlyLocalLights ^= true; }
-            if (ImGui::MenuItem("Disable direct and local lights", "", noDirectLight)) { noDirectLight ^= true; }
+            if (ImGui::MenuItem("Disable direct light", "", noDirectLight)) { noDirectLight ^= true; }
+            if (ImGui::MenuItem("Disable local lights", "", noLocalLight)) { noLocalLight ^= true; }
             ImGui::EndMenu();
         }
 
@@ -549,14 +609,16 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("  Kd", "", mode == 3)) { mode = 3; }
             if (ImGui::MenuItem("  Ks / Alpha", "", mode == 4)) { mode = 4; }
             ImGui::Separator();
-            if (ImGui::MenuItem("Deferred + Local lights", "", mode == 5)) { mode = 5; }
-            ImGui::Separator();
             ImGui::TextDisabled("Shadow Map");
-            if (ImGui::MenuItem("  Before blur", "", mode == 6)) { mode = 6; }
-            if (ImGui::MenuItem("  After blur", "", mode == 7)) { mode = 7; }
+            if (ImGui::MenuItem("  Shadow Map", "", mode == 5)) { mode = 5; }
             ImGui::Separator();
             ImGui::TextDisabled("Ambient Occlusion");
-            if (ImGui::MenuItem("  AO (after blur)", "", mode == 8)) { mode = 8; }
+            if (ImGui::MenuItem("  AO (after blur)", "", mode == 6)) { mode = 6; }
+            ImGui::Separator();
+            ImGui::TextDisabled("Pencil");
+            if (ImGui::MenuItem("  Contour edges", "", mode == 7)) { mode = 7; pencilMode = 1; }
+            if (ImGui::MenuItem("  Interior shading", "", mode == 8)) { mode = 8; pencilMode = 1; }
+            if (ImGui::MenuItem("  Combined full pencil", "", mode == 9)) { mode = 9; pencilMode = 1; }
             ImGui::EndMenu();
         }
 
@@ -567,6 +629,7 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Shadows", "", showShadowWindow)) { showShadowWindow ^= true; }
             if (ImGui::MenuItem("Ambient Occlusion", "", showAOWindow)) { showAOWindow ^= true; }
             if (ImGui::MenuItem("Camera", "", showCameraWindow)) { showCameraWindow ^= true; }
+            if (ImGui::MenuItem("Contour", "", showContourWindow)) { showContourWindow ^= true; }
             if (ImGui::MenuItem("Stats", "", showStatsWindow)) { showStatsWindow ^= true; }
             ImGui::Separator();
             if (ImGui::MenuItem("ImGui Demo", "", showDemoWindow)) { showDemoWindow ^= true; }
@@ -622,6 +685,7 @@ void Scene::DrawMenu()
     if (showShadowWindow) {
         ImGui::Begin("Shadows", &showShadowWindow);
         ImGui::SliderInt("Blur radius", &blurRadius, 1, 100);
+        ImGui::MenuItem("Show blurred", "", &shadowShowBlurred);
         ImGui::End();
     }
 
@@ -642,6 +706,25 @@ void Scene::DrawMenu()
         if (ImGui::Button("View AO buffer")) { mode = 8; }
         ImGui::SameLine();
         if (mode == 8 && ImGui::Button("Back to default")) { mode = 0; }
+        ImGui::End();
+    }
+
+    // contour window
+    if (showContourWindow) {
+        ImGui::Begin("Contour", &showContourWindow);
+        ImGui::Text("Edge Detection");
+        ImGui::SliderFloat("Normal threshold", &contourNormalThreshold, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("Depth threshold", &contourDepthThreshold, 0.01f, 5.0f, "%.2f");
+        ImGui::Separator();
+        ImGui::Text("Pencil Shake");
+        ImGui::SliderFloat("Shake amplitude", &contourShakeAmp, 0.0f, 0.02f, "%.4f");
+        ImGui::SliderFloat("Shake frequency", &contourShakeFreq, 1.0f, 100.0f, "%.1f");
+        ImGui::SliderInt("Num shakes", &contourNumShakes, 1, 10);
+        ImGui::SliderFloat("Pencil tile", &contourPencilTile, 0.5f, 20.0f, "%.1f");
+        ImGui::Separator();
+        if (ImGui::Button("View contour buffer")) { mode = 9; }
+        ImGui::SameLine();
+        if (mode == 9 && ImGui::Button("Back to default")) { mode = 0; }
         ImGui::End();
     }
 
@@ -837,7 +920,7 @@ void Scene::DrawScene()
     ////////////////////////////////////////////////////////////////////////////////
 #pragma region BlurPass
     // before blur debug view
-    if (mode == 6) {
+    if (mode == 5 && !shadowShowBlurred) {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_DEPTH_TEST);
@@ -875,7 +958,7 @@ void Scene::DrawScene()
     blurVProgram->UnuseShader();
 
 	// after blur debug view
-    if (mode == 7) {
+    if (mode == 5 && shadowShowBlurred) {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_DEPTH_TEST);
@@ -1029,7 +1112,7 @@ void Scene::DrawScene()
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     aoBlurVProgram->UnuseShader();
 
-    if (mode == 8) {
+    if (mode == 6) {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_DEPTH_TEST);
@@ -1049,10 +1132,172 @@ void Scene::DrawScene()
     
 #pragma endregion
     ////////////////////////////////////////////////////////////////////////////////
-    // Deferred shading pass + local lights
+    // Contour pass
+    ////////////////////////////////////////////////////////////////////////////////
+#pragma region ContourPass
+    if(pencilMode){
+        if (contourFBO.width != width || contourFBO.height != height) {
+            contourFBO.DestroyFBO();
+            contourFBO.CreateAoFBO(width, height);
+        }
+
+        contourFBO.BindFBO();
+        glViewport(0, 0, width, height);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        contourProgram->UseShader();
+        {
+            int pid = contourProgram->programId;
+
+            gbufferFBO.BindTexture(0, 0, pid, "gWorldPos");
+            gbufferFBO.BindTexture(1, 1, pid, "gNormal");
+
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 2));
+            glBindTexture(GL_TEXTURE_2D, contourPencilTex);
+            glUniform1i(glGetUniformLocation(pid, "contourPencilTex"), 2);
+
+            glUniform3fv(glGetUniformLocation(pid, "lightPos"), 1, (float*)&lightPos);
+            glUniform2f(glGetUniformLocation(pid, "screenSize"), (float)width, (float)height);
+
+            glUniform1f(glGetUniformLocation(pid, "normalThreshold"), contourNormalThreshold);
+            glUniform1f(glGetUniformLocation(pid, "depthThreshold"), contourDepthThreshold);
+            glUniform1f(glGetUniformLocation(pid, "shakeAmp"), contourShakeAmp);
+            glUniform1f(glGetUniformLocation(pid, "shakeFreq"), contourShakeFreq);
+            glUniform1i(glGetUniformLocation(pid, "numShakes"), contourNumShakes);
+            glUniform1f(glGetUniformLocation(pid, "pencilTile"), contourPencilTile);
+
+            glBindVertexArray(deferredVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 2));
+            glBindTexture(GL_TEXTURE_2D, 0);
+            gbufferFBO.UnbindTexture(1);
+            gbufferFBO.UnbindTexture(0);
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        }
+        contourProgram->UnuseShader();
+        contourFBO.UnbindFBO();
+
+        if (mode == 7) {
+            glViewport(0, 0, width, height);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glDisable(GL_DEPTH_TEST);
+
+            contourDebugProgram->UseShader();
+            {
+                int pid = contourDebugProgram->programId;
+                contourFBO.BindTexture(0, 0, pid, "contourMap");
+                glBindVertexArray(deferredVAO);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindVertexArray(0);
+                contourFBO.UnbindTexture(0);
+            }
+            contourDebugProgram->UnuseShader();
+            return;
+        }
+    }
+#pragma endregion
+    ////////////////////////////////////////////////////////////////////////////////
+    // Interior shading pass
+    ////////////////////////////////////////////////////////////////////////////////
+#pragma region InteriorPass
+    if(pencilMode){
+        if (interiorFBO.width != width || interiorFBO.height != height) {
+            interiorFBO.DestroyFBO();
+            interiorFBO.CreateAoFBO(width, height);
+        }
+
+        interiorFBO.BindFBO();
+        glViewport(0, 0, width, height);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        interiorProgram->UseShader();
+        {
+            int pid = interiorProgram->programId;
+
+            gbufferFBO.BindTexture(0, 0, pid, "gWorldPos");
+            gbufferFBO.BindTexture(1, 1, pid, "gNormal");
+            gbufferFBO.BindTexture(2, 2, pid, "gKd");
+            aoFBO.BindTexture(0, 3, pid, "aoMap");
+
+            // Pencil tones 3D texture
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 4));
+            glBindTexture(GL_TEXTURE_3D, pencilTones3D);
+            glUniform1i(glGetUniformLocation(pid, "pencilTones3D"), 4);
+
+            // Paper normal map
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 5));
+            glBindTexture(GL_TEXTURE_2D, paperNormalMap);
+            glUniform1i(glGetUniformLocation(pid, "paperNormalMap"), 5);
+
+            glUniform3fv(glGetUniformLocation(pid, "Light"), 1, (float*)&Light);
+            glUniform3fv(glGetUniformLocation(pid, "Ambient"), 1, (float*)&Ambient);
+            glUniform3fv(glGetUniformLocation(pid, "lightPos"), 1, (float*)&lightPos);
+
+            glm::vec3 eyePosWS = glm::vec3(WorldInverse * glm::vec4(0, 0, 0, 1));
+            glUniform3fv(glGetUniformLocation(pid, "eyePos"), 1, (float*)&eyePosWS);
+
+            glUniform1f(glGetUniformLocation(pid, "pencilTile"), interiorPencilTile);
+            glUniform1f(glGetUniformLocation(pid, "paperStrength"), interiorPaperStrength);
+            glUniform1f(glGetUniformLocation(pid, "paperTile"), interiorPaperTile);
+            glUniform1f(glGetUniformLocation(pid, "crossHatchBelow"), interiorCrossHatchBelow);
+
+            glBindVertexArray(deferredVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 5));
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 4));
+            glBindTexture(GL_TEXTURE_3D, 0);
+            aoFBO.UnbindTexture(3);
+            gbufferFBO.UnbindTexture(2);
+            gbufferFBO.UnbindTexture(1);
+            gbufferFBO.UnbindTexture(0);
+        }
+        interiorProgram->UnuseShader();
+        interiorFBO.UnbindFBO();
+
+        if (mode == 8) {
+            glViewport(0, 0, width, height);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            glDisable(GL_DEPTH_TEST);
+
+            interiorDebugProgram->UseShader();
+            {
+                int pid = interiorDebugProgram->programId;
+                interiorFBO.BindTexture(0, 0, pid, "interiorMap");
+                glBindVertexArray(deferredVAO);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindVertexArray(0);
+                interiorFBO.UnbindTexture(0);
+            }
+            interiorDebugProgram->UnuseShader();
+            return;
+        }
+    }
+#pragma endregion
+    ////////////////////////////////////////////////////////////////////////////////
+    // Deferred shading pass
     ////////////////////////////////////////////////////////////////////////////////
     {
 #pragma region DeferredPass
+        // When pencil mode is on, render into an FBO so the composition
+        // pass can sample the result (needed for sky regions).  When off,
+        // render directly to the screen as usual
+        if (pencilMode) {
+            if (deferredOutputFBO.width != width || deferredOutputFBO.height != height) {
+                deferredOutputFBO.DestroyFBO();
+                deferredOutputFBO.CreateFBO(width, height);
+            }
+            deferredOutputFBO.BindFBO();
+        }
+
         glViewport(0, 0, width, height);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
@@ -1061,7 +1306,7 @@ void Scene::DrawScene()
         deferredProgram->UseShader();
         programId = deferredProgram->programId;
 
-		// Bind G-buffer textures and shadow map
+        // Bind G-buffer textures and shadow map
         gbufferFBO.BindTexture(0, 0, programId, "gWorldPos");
         gbufferFBO.BindTexture(1, 1, programId, "gNormal");
         gbufferFBO.BindTexture(2, 2, programId, "gKd");
@@ -1075,22 +1320,22 @@ void Scene::DrawScene()
         // bind AO map
         aoFBO.BindTexture(0, 7, programId, "aoMap");
 
-		// turn off lights if only local lights mode is on 
+        // turn off lights if only local lights mode is on 
         const glm::vec3 nothing(0.0f, 0.0f, 0.0f);
-		if (onlyLocalLights) {
+        if (onlyLocalLights) {
             glUniform3fv(glGetUniformLocation(programId, "Light"), 1, (float*)&nothing);
             glUniform3fv(glGetUniformLocation(programId, "Ambient"), 1, (float*)&nothing);
-		}
+        }
         else {
             glUniform3fv(glGetUniformLocation(programId, "Light"), 1, (float*)&Light);
-			glUniform3fv(glGetUniformLocation(programId, "Ambient"), 1, (float*)&Ambient);
+            glUniform3fv(glGetUniformLocation(programId, "Ambient"), 1, (float*)&Ambient);
         }
         // light position for specular and shadows
         glUniform3fv(glGetUniformLocation(programId, "lightPos"), 1, (float*)&lightPos);
         glm::vec3 eyePosWS = glm::vec3(WorldInverse * glm::vec4(0, 0, 0, 1));
         glUniform3fv(glGetUniformLocation(programId, "eyePos"), 1, (float*)&eyePosWS);
         glUniformMatrix4fv(glGetUniformLocation(programId, "ShadowMatrix"), 1, GL_FALSE, glm::value_ptr(ShadowMatrix));
-		
+
         // z0 and z1 for reconstructing world position from depth in the shader
         loc = glGetUniformLocation(deferredProgram->programId, "z0");
         glUniform1f(loc, z0);
@@ -1113,15 +1358,15 @@ void Scene::DrawScene()
         gbufferFBO.UnbindTexture(2);
         gbufferFBO.UnbindTexture(1);
         gbufferFBO.UnbindTexture(0);
-		aoFBO.UnbindTexture(7);
+        aoFBO.UnbindTexture(7);
 
         deferredProgram->UnuseShader();
 #pragma endregion
-    ////////////////////////////////////////////////////////////////////////////////
-    // local lights pass
-    ////////////////////////////////////////////////////////////////////////////////
+        ////////////////////////////////////////////////////////////////////////////////
+        // local lights pass
+        ////////////////////////////////////////////////////////////////////////////////
 #pragma region LocalLightsPass
-        if (!noDirectLight){
+        if (!noDirectLight && !noLocalLight) {
             glDisable(GL_DEPTH_TEST);
             glEnable(GL_BLEND);
             glBlendFunc(GL_ONE, GL_ONE);
@@ -1158,6 +1403,54 @@ void Scene::DrawScene()
             glDisable(GL_BLEND);
             glEnable(GL_DEPTH_TEST);
             glCullFace(GL_BACK);
+        }
+#pragma endregion
+        ////////////////////////////////////////////////////////////////////////////////
+		// pencil composition pass
+        ////////////////////////////////////////////////////////////////////////////////
+#pragma region PencilCompositionPass
+        if (pencilMode) {
+            deferredOutputFBO.UnbindFBO();
+
+            ////////////////////////////////////////////////////////////////
+            // Pencil composition pass — combines contour + interior +
+            // paper tooth + deferred sky into the final screen output.
+            ////////////////////////////////////////////////////////////////
+            glViewport(0, 0, width, height);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            pencilCompositeProgram->UseShader();
+            {
+                int pid = pencilCompositeProgram->programId;
+
+                contourFBO.BindTexture(0, 0, pid, "contourMap");
+                interiorFBO.BindTexture(0, 1, pid, "interiorMap");
+                gbufferFBO.BindTexture(0, 2, pid, "gWorldPos");
+                deferredOutputFBO.BindTexture(0, 3, pid, "deferredMap");
+
+                // Paper normal map (raw GL handle)
+                glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 4));
+                glBindTexture(GL_TEXTURE_2D, paperNormalMap);
+                glUniform1i(glGetUniformLocation(pid, "paperNormalMap"), 4);
+
+                glUniform1f(glGetUniformLocation(pid, "paperTile"), interiorPaperTile);
+                glUniform3fv(glGetUniformLocation(pid, "paperColor"), 1, (float*)&pencilPaperColor);
+                glUniform1f(glGetUniformLocation(pid, "contrastAmount"), pencilContrast);
+
+                glBindVertexArray(deferredVAO);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindVertexArray(0);
+
+                glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + 4));
+                glBindTexture(GL_TEXTURE_2D, 0);
+                deferredOutputFBO.UnbindTexture(3);
+                gbufferFBO.UnbindTexture(2);
+                interiorFBO.UnbindTexture(1);
+                contourFBO.UnbindTexture(0);
+            }
+            pencilCompositeProgram->UnuseShader();
         }
 #pragma endregion
     }

@@ -17,10 +17,14 @@ const int teapotId = 9;
 const int spheresId = 10;
 const int floorId = 11;
 
+const float PI = 3.14159265358979323846;
+
+
 in vec3 vWorldPos;
 in vec3 vN;
 in vec2 vUV;
 in vec3 vT;
+in vec2 vCurvDA;
 
 uniform sampler2D tex;
 uniform int hasTexture;
@@ -64,9 +68,15 @@ void main()
         vec3 d = texture(normalMap, uv).xyz * 2.0 - vec3(1);
         N = normalize(d.x*T + d.y*B + d.z*N);
     }
+
+    float theta2 = atan(vCurvDA.y, vCurvDA.x);
+    float theta  = 0.5 * theta2;
+    if (theta < 0.0) theta += PI;
+    float thetaNorm = theta / PI;
+
     float isGeometry = (objectId == skyId) ? 0.0 : 1.0;
     G0_WorldPos = vec4(vWorldPos, isGeometry);
-    G1_WorldN   = vec4(N, 1.0);
+    G1_WorldN   = vec4(N, thetaNorm);
     G2_Kd       = vec4(Kd, 1.0);
     G3_KsAlpha  = vec4(Ks, alpha);
 }

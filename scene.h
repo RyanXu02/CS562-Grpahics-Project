@@ -18,6 +18,8 @@
 #include "fbo.h"
 #include "HDR.h"
 
+#include "pencil_preprocess.h"
+
 enum ObjectIds {
     nullId	= 0,
     skyId	= 1,
@@ -75,6 +77,7 @@ public:
     int localLightDebug = 0; // 1 for debug mode
     int onlyLocalLights = 0; // 1 for only local lights mode
     int localLightCount = 128;
+	int noLocalLight = 0; // 1 to disable local lights (test IBL + direct light)
     int noDirectLight = 0; // 1 to disable direct lights (test diffuse IBL)
 
     int mode; // Extra mode indicator hooked up to number keys and sent to shader
@@ -107,6 +110,7 @@ public:
     ShaderProgram* shadowDebugProgram;
     FBO shadowBlurFBO;
     int blurRadius = 30;
+    bool shadowShowBlurred = true;
     float z0;
     float z1;
 
@@ -131,6 +135,11 @@ public:
 	float exposure = 2.0f;
     float teapotAlpha = 120.0f;
 
+    // Pencil rendering preprocessed assets
+    unsigned int pencilTones3D = 0; // GL_TEXTURE_3D:  WxHx32 tone stack
+    unsigned int paperNormalMap = 0; // GL_TEXTURE_2D:  paper tooth normals
+    unsigned int contourPencilTex = 0; // GL_TEXTURE_2D: strokes for contour tint
+
     // Ambient Occlusion
     ShaderProgram* aoProgram;
     ShaderProgram* aoBlurHProgram;
@@ -151,6 +160,37 @@ public:
     ShaderProgram* aoDebugProgram;
 
 
+#pragma region PencilRendering
+    // Pencil contour pass
+    ShaderProgram* contourProgram;
+    ShaderProgram* contourDebugProgram;
+    FBO contourFBO;
+    // Contour pass parameters
+    float contourNormalThreshold = 0.6f;  // 1=coplanar only, 0.5=60° crease
+    float contourDepthThreshold = 0.5f;  // worldspace units
+    float contourShakeAmp = 0.002f; // in UV
+    float contourShakeFreq = 40.0f;
+    int   contourNumShakes = 4;     // 3-5 per paper
+    float contourPencilTile = 4.0f;
+
+    // Pencil interior pass
+    ShaderProgram* interiorProgram;
+    ShaderProgram* interiorDebugProgram;
+    FBO interiorFBO;
+    // interior pass parameters
+    float interiorPencilTile = 6.0f;
+    float interiorPaperStrength = 0.05f;  // mu_p in the paper (0..0.1)
+    float interiorPaperTile = 2.0f;   // paper tooth frequency
+    float interiorCrossHatchBelow = 0.35f; // cross-hatch below this brightness
+    
+    // pencil composite pass
+    ShaderProgram* pencilCompositeProgram;
+    FBO deferredOutputFBO;  // for deferred+local lights
+    int pencilMode = 0;
+    float pencilContrast = 0.3f;
+    glm::vec3 pencilPaperColor = glm::vec3(0.96f, 0.95f, 0.93f); // warm cream
+
+#pragma endregion
     // Options menu stuff
     bool show_demo_window;
 

@@ -14,6 +14,7 @@
     <ProjectGuid>{1FBA3F3A-3282-A709-2E8A-1DA52B9CF3A0}</ProjectGuid>
     <RootNamespace>CS350framework</RootNamespace>
     <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -66,6 +67,7 @@
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <DisableSpecificWarnings>4251;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>libs\glfw-3.3.2.bin.WIN32\lib-vc2019\glfw3.lib;libs\glbinding.lib;gdi32.lib;winmm.lib;user32.lib;glu32.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -92,6 +94,7 @@
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <DisableSpecificWarnings>4251;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <AdditionalDependencies>libs\glfw-3.3.2.bin.WIN32\lib-vc2019\glfw3.lib;libs\glbinding.lib;gdi32.lib;winmm.lib;user32.lib;glu32.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -120,6 +123,7 @@
     <ClCompile Include="libs\imgui-master\imgui_demo.cpp" />
     <ClCompile Include="libs\imgui-master\imgui_draw.cpp" />
     <ClCompile Include="libs\imgui-master\imgui_widgets.cpp" />
+    <ClCompile Include="pencil_preprocess.cpp" />
     <ClCompile Include="rply.c" />
     <ClCompile Include="scene.cpp" />
     <ClCompile Include="shader.cpp" />
@@ -139,6 +143,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="HDR.h" />
+    <ClInclude Include="pencil_preprocess.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
