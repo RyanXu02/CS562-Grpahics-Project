@@ -27,6 +27,12 @@ static void error_callback(int error, const char* msg)
     fputs(msg, stderr);
 }
 
+// Force dedicated NVIDIA GPU on Optimus systems
+extern "C" {
+    __declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+    __declspec(dllexport) unsigned long AmdPowerXpressRequestHighPerformance = 0x00000001;
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Do the OpenGL/GLFW setup and then enter the interactive loop.
 int main(int argc, char** argv)
